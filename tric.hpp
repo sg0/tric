@@ -105,7 +105,6 @@ class Triangulate
         
         inline void isend(int tag, int target, GraphElem data[2])
         {
-            // copy into persistent buffer before messaging 
             memcpy(&sbuf_[sbuf_ctr_], data, 2*sizeof(GraphElem));
 
             MPI_Isend(&sbuf_[sbuf_ctr_], 2, MPI_GRAPH_TYPE, 
@@ -237,12 +236,14 @@ class Triangulate
         Graph* g_;
         GraphElem lnv_;
         GraphElem ntriangles_, g_ntriangles_;
-        GraphElem *sbuf_;
-        GraphElem sbuf_ctr_;
         std::vector<GraphElem> ghost_count_;
         GraphElem tot_ghosts_, nghosts_;
+        
+	GraphElem *sbuf_;
+        GraphElem sbuf_ctr_;
         MPI_Request *sreq_;
-        int rank_, size_;
+        
+	int rank_, size_;
         MPI_Comm comm_;
 };
 

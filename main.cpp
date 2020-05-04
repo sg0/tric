@@ -84,7 +84,12 @@ int main(int argc, char *argv[])
 
     // generate graph only supports RGG as of now
     if (generateGraph) 
-    { 
+    {
+	if (!is_pwr2(nprocs)) 
+	{
+	    std::cout << "Error: random geometric graph generation require power-of-2 #processes." << std::endl;
+	    MPI_Abort(MPI_COMM_WORLD, -99);
+	}
         GenerateRGG gr(nvRGG);
         g = gr.generate(randomNumberLCG, true /*isUnitEdgeWeight*/, randomEdgePercent);
     }
