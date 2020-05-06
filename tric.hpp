@@ -73,14 +73,15 @@ class Triangulate
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
 
-                for (GraphElem e = e0; e < e1; e++)
+                for (GraphElem e = e0; e < e1; e += 2)
                 {
-                    Edge const& edge = g_->get_edge(e);
+                    Edge const& edge_p = g_->get_edge(e);
+                    Edge const& edge_n = g_->get_edge(e + 1);
                     
-                    if (g_->get_owner(edge.tail_) != rank_)
+                    if (g_->get_owner(edge_p.tail_) != rank_)
                         ghost_count_[i] += 1;
                 }
-
+               
                 tot_ghosts_ += ghost_count_[i];
             }
             
@@ -135,10 +136,10 @@ class Triangulate
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
 
-                for (GraphElem e = e0 + 1; e < e1; e++)
+                for (GraphElem e = e0; e < e1; e += 2)
                 {
-                    Edge const& edge_p = g_->get_edge(e - 1);
-                    Edge const& edge_c = g_->get_edge(e);
+                    Edge const& edge_p = g_->get_edge(e);
+                    Edge const& edge_c = g_->get_edge(e + 1);
                     pair[0] = edge_p.tail_;
                     pair[1] = edge_c.tail_;
 
