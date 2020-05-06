@@ -56,7 +56,7 @@ class Triangulate
     public:
 
         Triangulate(Graph* g): 
-            g_(g), sbuf_ctr_(0), tot_ghosts_(0),
+            g_(g), sbuf_ctr_(0), sreq_ctr_(0),tot_ghosts_(0),
             nghosts_(0), sbuf_(nullptr), sreq_(nullptr),
             ntriangles_(0), g_ntriangles_(0)
         {
@@ -75,10 +75,8 @@ class Triangulate
 
                 for (GraphElem e = e0; e < e1; e += 2)
                 {
-                    Edge const& edge_p = g_->get_edge(e);
-                    Edge const& edge_n = g_->get_edge(e + 1);
-                    
-                    if (g_->get_owner(edge_p.tail_) != rank_)
+                    Edge const& edge = g_->get_edge(e);
+                    if (g_->get_owner(edge.tail_) != rank_)
                         ghost_count_[i] += 1;
                 }
                
@@ -109,21 +107,22 @@ class Triangulate
             memcpy(&sbuf_[sbuf_ctr_], data, 2*sizeof(GraphElem));
 
             MPI_Isend(&sbuf_[sbuf_ctr_], 2, MPI_GRAPH_TYPE, 
-                    target, tag, comm_, &sreq_[(sbuf_ctr_/2)]);
+                    target, tag, comm_, &sreq_[sreq_ctr_]);
 
-            MPI_Request_free(&sreq_[(sbuf_ctr_/2)]);
-
-            sbuf_ctr_ += 2;
+	    MPI_Request_free(&sreq_[sreq_ctr_]);
+            
+	    sbuf_ctr_ += 2;
+	    sreq_ctr_++;
         }
         
         inline void isend(int tag, int target)
         {
             MPI_Isend(&sbuf_[sbuf_ctr_], 0, MPI_GRAPH_TYPE, 
-                    target, tag, comm_, &sreq_[(sbuf_ctr_/2)]);
+                    target, tag, comm_, &sreq_[sreq_ctr_]);
 
-            MPI_Request_free(&sreq_[(sbuf_ctr_/2)]);
+	    MPI_Request_free(&sreq_[sreq_ctr_]);
 
-            sbuf_ctr_ += 2;
+	    sreq_ctr_++;
         }
 
         inline void possible_edges()
@@ -225,7 +224,8 @@ class Triangulate
                 if (ng == 0)
                     break;
             }
-                
+            
+	    MPI_Waitall(tot_ghosts_, sreq_, MPI_STATUSES_IGNORE);    
             GraphElem tcount =  ntriangles_ + (g_ntriangles_ / 2);
             GraphElem ttc;
             MPI_Reduce(&tcount, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
@@ -241,7 +241,7 @@ class Triangulate
         GraphElem tot_ghosts_, nghosts_;
         
 	GraphElem *sbuf_;
-        GraphElem sbuf_ctr_;
+        GraphElem sbuf_ctr_, sreq_ctr_;
         MPI_Request *sreq_;
         
 	int rank_, size_;
