@@ -160,6 +160,7 @@ class Triangulate
         {
             GraphElem e0, e1;
             g_->edge_range(pair[0], e0, e1);
+            std::cout << "v: " << pair[0] << std::endl;
 
             for (GraphElem e = e0; e < e1; e++)
             {
@@ -192,7 +193,7 @@ class Triangulate
                 MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
                 MPI_Recv(g_l, count, MPI_GRAPH_TYPE, status.MPI_SOURCE, 
                         status.MPI_TAG, comm_, MPI_STATUS_IGNORE);   
-                nghosts_--;
+                nghosts_ -= 1;
             }
             else
                 return;
@@ -200,7 +201,6 @@ class Triangulate
             if (status.MPI_TAG == EDGE_SEARCH_TAG) 
             {
                 g_l[0] = g_->global_to_local(g_l[0]);
-
                 if (!check_edgelist(g_l, true))
                     isend(EDGE_INVALID_TAG, status.MPI_SOURCE);
                 else
