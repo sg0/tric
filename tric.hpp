@@ -164,7 +164,7 @@ class Triangulate
             }
         }
         
-        inline bool check_edgelist(GraphElem pair[2])
+        inline bool check_edgelist(GraphElem pair[2], bool remote=false)
         {
             GraphElem e0, e1;
             const GraphElem lv = g_->global_to_local(pair[0]);
@@ -175,7 +175,8 @@ class Triangulate
                 Edge const& edge = g_->get_edge(e);
                 if (edge.tail_ == pair[1])
                 {
-                    ntriangles_++;
+                    if (!remote)
+                        ntriangles_++;
                     return true;
                 }
             }
@@ -204,7 +205,7 @@ class Triangulate
 
             if (status.MPI_TAG == EDGE_SEARCH_TAG) 
             {
-                if (!check_edgelist(g_l))
+                if (!check_edgelist(g_l, true))
                     isend(EDGE_INVALID_TAG, status.MPI_SOURCE);
                 else
                     isend(EDGE_VALID_TAG, status.MPI_SOURCE);
