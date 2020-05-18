@@ -49,8 +49,7 @@
 
 #define EDGE_SEARCH_TAG            1 
 #define EDGE_INVALID_TAG           2
-#define EDGE_VALID_NONCONS_TAG     3
-#define EDGE_VALID_CONS_TAG        4
+#define EDGE_VALID_TAG             3
 
 class Triangulate
 {
@@ -71,23 +70,23 @@ class Triangulate
             {
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
-
+                
                 if ((e0 + 1) == e1)
                     continue;
 
-                for (GraphElem e = e0 + 1; e < e1; e++)
+                for (GraphElem m = e0; m < e1; m++)
                 {
-                    Edge const& edge_p = g_->get_edge(e - 1);
-                    Edge const& edge_c = g_->get_edge(e);
-                    if (g_->get_owner(edge_p.tail_) != rank_)
-                        tot_ghosts_++;
-                    if (g_->get_owner(edge_c.tail_) != rank_)
-                        tot_ghosts_++;
+                    for (GraphElem n = m + 1; n < e1; n++)
+                    {
+                        Edge const& edge = g_->get_edge(m);
+                        if (g_->get_owner(edge.tail_) != rank_)
+                            tot_ghosts_ += 1;
+                    }
                 }
             }
 
-            sbuf_ = new GraphElem[tot_ghosts_*3]; 
-            sreq_ = new MPI_Request[tot_ghosts_*2*2];
+            sbuf_ = new GraphElem[tot_ghosts_*2]; 
+            sreq_ = new MPI_Request[tot_ghosts_*2];
             nghosts_ = tot_ghosts_; 
         }
 
@@ -104,16 +103,16 @@ class Triangulate
         {
         }
         
-        inline void isend(int tag, int target, GraphElem data[3])
+        inline void isend(int tag, int target, GraphElem data[2])
         {
-            memcpy(&sbuf_[sbuf_ctr_], data, 3*sizeof(GraphElem));
+            memcpy(&sbuf_[sbuf_ctr_], data, 2*sizeof(GraphElem));
 
-            MPI_Isend(&sbuf_[sbuf_ctr_], 3, MPI_GRAPH_TYPE, 
+            MPI_Isend(&sbuf_[sbuf_ctr_], 2, MPI_GRAPH_TYPE, 
                     target, tag, comm_, &sreq_[sreq_ctr_]);
 
 	    MPI_Request_free(&sreq_[sreq_ctr_]);
             
-	    sbuf_ctr_ += 3;
+	    sbuf_ctr_ += 2;
 	    sreq_ctr_++;
         }
         
@@ -130,89 +129,60 @@ class Triangulate
         inline void lookup_edges()
         {
             const GraphElem lnv = g_->get_lnv();
-            GraphElem tup_1[3] = {0}, tup_2[3] = {0};
-                       
+            GraphElem tup[2] = {0};
+
             for (GraphElem i = 0; i < lnv; i++)
             {
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
-                
+
                 if ((e0 + 1) == e1)
                     continue;
 
-                tup_1[0] = g_->local_to_global(i);
-                tup_2[0] = tup_1[0];
-                
-                for (GraphElem e = e0+1; e < e1; e++)
+                for (GraphElem m = e0; m < e1; m++)
                 {
-                    Edge const& edge_p = g_->get_edge(e-1);
-                    Edge const& edge_c = g_->get_edge(e);
-                    
-                    tup_1[1] = edge_p.tail_;
-                    tup_1[2] = edge_c.tail_;
-                    tup_2[1] = tup_1[2];
-                    tup_2[2] = tup_1[1];
-                    
-                    const int owner_1 = g_->get_owner(tup_1[1]);
-                    if (owner_1 == rank_)
+                    for (GraphElem n = m + 1; n < e1; n++)
                     {
-                        int stat = check_edgelist(tup_1);
-                        if (stat >= 0)
-                        {
-                            ntriangles_ += 1;
-                            ntriangles_ += stat;
-                        }
-                    }
-                    else
-                        isend(EDGE_SEARCH_TAG, owner_1, tup_1);
+                        Edge const& edge_m = g_->get_edge(m);
+                        Edge const& edge_n = g_->get_edge(n);
 
-                    const int owner_2 = g_->get_owner(tup_2[1]);
-                    if (owner_2 == rank_)
-                    {
-                        if (check_edgelist(tup_2) == 1)
-                            ntriangles_ += 1;
+                        tup[0] = edge_m.tail_;
+                        tup[1] = edge_n.tail_;
+
+                        const int owner = g_->get_owner(tup[0]);
+                        if (owner == rank_)
+                        {
+                            if (check_edgelist(tup))
+                                ntriangles_ += 1;
+                        }
+                        else
+                            isend(EDGE_SEARCH_TAG, owner, tup);
                     }
-                    else
-                        isend(EDGE_SEARCH_TAG, owner_2, tup_2);
                 }
             }
         }
         
-        inline int check_edgelist(GraphElem tup[3])
+        inline bool check_edgelist(GraphElem tup[2])
         {
-            GraphElem e0, e1, c_e = 0, n_e = 0;
-            const GraphElem lv = g_->global_to_local(tup[1]);
+            GraphElem e0, e1;
+            const GraphElem lv = g_->global_to_local(tup[0]);
             g_->edge_range(lv, e0, e1);
 
             for (GraphElem e = e0; e < e1; e++)
             {
                 Edge const& edge = g_->get_edge(e);
-
-                if (edge.tail_ == tup[0])
-                    c_e = e + 1;
-                if (edge.tail_ == tup[2])
-                    n_e = e + 1;
-
-                if (c_e && n_e)
-                    break;
+                if (edge.tail_ == tup[1])
+                    return true;
             }
 
-            if (n_e)
-            {
-                if (std::abs(n_e - c_e) > 1)
-                    return 1;
-                if (std::abs(n_e - c_e) == 1)
-                    return 0;
-            }
-
-            return -1;
+            return false;
         }
 
         inline void process_edges()
         {
             MPI_Status status;
             int flag = -1;
-            GraphElem tup[3] = {0};
+            GraphElem tup[2] = {0};
             int count = 0;
 
             MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, comm_, 
@@ -229,26 +199,15 @@ class Triangulate
 
             if (status.MPI_TAG == EDGE_SEARCH_TAG) 
             {
-                int stat = check_edgelist(tup);
-
-                if (stat == 1)
-                    isend(EDGE_VALID_NONCONS_TAG, status.MPI_SOURCE);
-                else if (stat == 0)
-                    isend(EDGE_VALID_CONS_TAG, status.MPI_SOURCE);
-                else // stat == -1
+                if (check_edgelist(tup))
+                {
+                    ntriangles_ += 1;
+                    isend(EDGE_VALID_TAG, status.MPI_SOURCE);
+                }
+                else 
                     isend(EDGE_INVALID_TAG, status.MPI_SOURCE);
             }
-            else if (status.MPI_TAG == EDGE_VALID_NONCONS_TAG)
-            {
-                ntriangles_ += 2;
-                nghosts_ -= 1;
-            }
-            else if (status.MPI_TAG == EDGE_VALID_CONS_TAG)
-            {
-                ntriangles_ += 1;
-                nghosts_ -= 1;
-            }
-            else // status.MPI_TAG == EDGE_INVALID_TAG
+            else // EDGE_VALID_TAG | EDGE_INVALID_TAG
                 nghosts_ -= 1;
         }
 
@@ -267,10 +226,9 @@ class Triangulate
             }
             
             GraphElem ttc;
-            ntriangles_ /= 3;
             MPI_Reduce(&ntriangles_, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
-            return ttc;
+            return (ttc/3);
         }
        
     private:
