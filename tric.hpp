@@ -76,10 +76,11 @@ class Triangulate
 
                 for (GraphElem m = e0; m < e1; m++)
                 {
+                    Edge const& edge = g_->get_edge(m);
+                    const int owner = g_->get_owner(edge.tail_);
                     for (GraphElem n = m + 1; n < e1; n++)
                     {
-                        Edge const& edge = g_->get_edge(m);
-                        if (g_->get_owner(edge.tail_) != rank_)
+                        if (owner != rank_)
                             tot_ghosts_ += 1;
                     }
                 }
@@ -141,15 +142,13 @@ class Triangulate
 
                 for (GraphElem m = e0; m < e1; m++)
                 {
+                    Edge const& edge_m = g_->get_edge(m);
+                    tup[0] = edge_m.tail_;
+                    const int owner = g_->get_owner(tup[0]);
                     for (GraphElem n = m + 1; n < e1; n++)
                     {
-                        Edge const& edge_m = g_->get_edge(m);
                         Edge const& edge_n = g_->get_edge(n);
-
-                        tup[0] = edge_m.tail_;
                         tup[1] = edge_n.tail_;
-
-                        const int owner = g_->get_owner(tup[0]);
                         if (owner == rank_)
                         {
                             if (check_edgelist(tup))
@@ -173,6 +172,8 @@ class Triangulate
                 Edge const& edge = g_->get_edge(e);
                 if (edge.tail_ == tup[1])
                     return true;
+                if (edge.tail_ > tup[1])
+                    break;
             }
 
             return false;
