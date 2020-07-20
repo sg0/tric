@@ -156,8 +156,8 @@ int main(int argc, char *argv[])
         std::cout << "Resolution of MPI_Wtime: " << MPI_Wtick() << std::endl;
     }
     
-    MPI_Barrier(MPI_COMM_WORLD);
     tr.clear(); 
+    MPI_Barrier(MPI_COMM_WORLD);
 
     MPI_Finalize();
 

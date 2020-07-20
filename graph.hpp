@@ -261,7 +261,7 @@ class Graph
 
             GraphWeight average  = (GraphWeight) sumdeg / size_;
             GraphWeight avg_sq   = (GraphWeight) sum_sq / size_;
-            GraphWeight var      = avg_sq - (average*average);
+            GraphWeight var      = std::abs(avg_sq - (average*average));
             GraphWeight stddev   = sqrt(var);
 
             MPI_Barrier(comm_);
