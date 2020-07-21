@@ -157,10 +157,11 @@ int main(int argc, char *argv[])
     MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, 
             MPI_SUM, 0, MPI_COMM_WORLD);
     if (me == 0) 
-    {
+    {   double avg_t = (double)(t_tot/(double)nprocs);
         std::cout << "Average execution time (in s) on " << nprocs << " processes: " 
-            << (double)(t_tot/(double)nprocs) << std::endl;
+            << avg_t << std::endl;
         std::cout << "Number of triangles: " << ntris << std::endl;
+        std::cout << "TEPS: " << g->get_ne()/avg_t << std::endl;
         std::cout << "Resolution of MPI_Wtime: " << MPI_Wtick() << std::endl;
     }
     
