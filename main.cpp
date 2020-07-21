@@ -52,7 +52,12 @@
 #include <string>
 
 #include <mpi.h>
+
+#ifdef NO_AGGR    
 #include "tric.hpp"
+#else
+#include "atric.hpp"
+#endif
 
 static std::string inputFileName;
 static int me, nprocs;
@@ -136,8 +141,11 @@ int main(int argc, char *argv[])
                 << nvRGG << " vertices (in s): " << tdt << std::endl;
     }
 
+#ifdef NO_AGGR    
     Triangulate tr(g);
-
+#else
+    TriangulateAggr tr(g);
+#endif
     MPI_Barrier(MPI_COMM_WORLD);
     
     t0 = MPI_Wtime();
