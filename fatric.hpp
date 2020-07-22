@@ -62,10 +62,10 @@ class TriangulateAggrFat
             send_counts_ = new GraphElem[size_];
             recv_counts_ = new GraphElem[size_];
             sbuf_ctr_ = new GraphElem[size_];
-            sbuf_disp_ = new GraphElem[size_+1];
+            sbuf_disp_ = new GraphElem[size_];
             memset(send_counts_, 0, sizeof(GraphElem)*size_);
             memset(sbuf_ctr_, 0, sizeof(GraphElem)*size_);
-            memset(sbuf_disp_, 0, sizeof(GraphElem)*(size_+1));
+            memset(sbuf_disp_, 0, sizeof(GraphElem)*(size_));
             const GraphElem lnv = g_->get_lnv();
             for (GraphElem i = 0; i < lnv; i++)
             {
@@ -87,10 +87,10 @@ class TriangulateAggrFat
             MPI_Alltoall(send_counts_, 1, MPI_GRAPH_TYPE, recv_counts_, 1, MPI_GRAPH_TYPE, comm_);
             for (int p = 0; p < size_; p++)
             {
+                sbuf_disp_[p] = out_ghosts_;
                 out_ghosts_ += send_counts_[p];
                 if (p != rank_)
                     in_ghosts_ += recv_counts_[p];
-                sbuf_disp_[p+1] = out_ghosts_;
             }
             nghosts_ = out_ghosts_ + in_ghosts_;
             sbuf_ = new GraphElem[out_ghosts_*2];
@@ -167,36 +167,37 @@ class TriangulateAggrFat
         {
             // local computation
             lookup_edges();
+            MPI_Barrier(comm_);
             // communication step 1
             GraphElem tup[2];
             GraphElem spos=0, rpos=0;
             GraphElem *sdispls = new GraphElem[size_];
             GraphElem *rdispls = new GraphElem[size_];
+            GraphElem *rptr = new GraphElem[size_+1];
             GraphElem *rinfo = new GraphElem[size_*2];
             memset(rinfo, 0, sizeof(GraphElem)*size_*2);
             GraphElem *srinfo = new GraphElem[size_*2];
             memset(srinfo, 0, sizeof(GraphElem)*size_*2);
             GraphElem *rbuf = new GraphElem[in_ghosts_*2];
-            GraphElem *rdisp = new GraphElem[size_+1];
-            memset(rdisp, 0, sizeof(GraphElem)*(size_+1));
             int *scnts = new int[size_];
             int *rcnts = new int[size_];
             for (int p = 0; p < size_; p++) 
             {
                 sdispls[p] = spos;
                 rdispls[p] = rpos;
-                scnts[p] = (int)send_counts_[p]*2;
-                rcnts[p] = (int)recv_counts_[p]*2;
+                scnts[p] = (int)(send_counts_[p]*2);
+                rcnts[p] = (int)(recv_counts_[p]*2);
                 spos += scnts[p];
                 rpos += rcnts[p];
-                rdisp[p+1] = rpos;
             }
             MPI_Alltoallv(sbuf_, scnts, (const int *)sdispls, MPI_GRAPH_TYPE, 
                     rbuf, rcnts, (const int *)rdispls, MPI_GRAPH_TYPE, comm_);
-            // EDGE_SEARCH_TAG 
+            std::memcpy(rptr, rdispls, size_*sizeof(GraphElem));
+            rptr[size_] = rpos;
+            // EDGE_SEARCH_TAG
             for (int p = 0; p < size_; p++)
             {
-                for (GraphElem k = rdisp[p]; k < rdisp[p+1]; k+=2)
+                for (GraphElem k = rptr[p]; k < rptr[p+1]; k+=2)
                 {
                     tup[0] = rbuf[k];
                     tup[1] = rbuf[k+1];
@@ -207,6 +208,7 @@ class TriangulateAggrFat
                     nghosts_ -= 1;
                 }
             }
+            MPI_Barrier(comm_);
             // communication step 2
             MPI_Alltoall(rinfo, 2, MPI_GRAPH_TYPE, srinfo, 2, MPI_GRAPH_TYPE, comm_);
             for (int p = 0; p < size_; p++)
@@ -214,15 +216,14 @@ class TriangulateAggrFat
                 ntriangles_ += srinfo[p*2];
                 nghosts_ -= srinfo[p*2+1];
             }
-            MPI_Barrier(comm_);
             delete []sdispls;
             delete []rdispls;
-            delete []rdisp;
             delete []rinfo;
             delete []srinfo;
             delete []rbuf;
             delete []scnts;
             delete []rcnts;
+            delete []rptr;
             GraphElem ttc = 0, ltc = ntriangles_;
             MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
             return (ttc/3);
