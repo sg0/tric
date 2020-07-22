@@ -85,15 +85,17 @@ class TriangulateAggrFat
                 }
             }
             MPI_Alltoall(send_counts_, 1, MPI_GRAPH_TYPE, recv_counts_, 1, MPI_GRAPH_TYPE, comm_);
+            GraphElem pos = 0;
             for (int p = 0; p < size_; p++)
             {
-                sbuf_disp_[p] = out_ghosts_;
-                out_ghosts_ += send_counts_[p];
+                sbuf_disp_[p] = pos;
                 if (p != rank_)
                     in_ghosts_ += recv_counts_[p];
+                out_ghosts_ += send_counts_[p];
+                pos += send_counts_[p]*2;
             }
             nghosts_ = out_ghosts_ + in_ghosts_;
-            sbuf_ = new GraphElem[out_ghosts_*2];
+            sbuf_ = new GraphElem[pos];
         }
 
         ~TriangulateAggrFat() {}
@@ -169,7 +171,6 @@ class TriangulateAggrFat
             lookup_edges();
             MPI_Barrier(comm_);
             // communication step 1
-            GraphElem tup[2];
             GraphElem spos=0, rpos=0;
             GraphElem *sdispls = new GraphElem[size_];
             GraphElem *rdispls = new GraphElem[size_];
@@ -190,11 +191,12 @@ class TriangulateAggrFat
                 spos += scnts[p];
                 rpos += rcnts[p];
             }
-            MPI_Alltoallv(sbuf_, scnts, (const int *)sdispls, MPI_GRAPH_TYPE, 
-                    rbuf, rcnts, (const int *)rdispls, MPI_GRAPH_TYPE, comm_);
             std::memcpy(rptr, rdispls, size_*sizeof(GraphElem));
             rptr[size_] = rpos;
+            MPI_Alltoallv(sbuf_, scnts, (const int *)sdispls, MPI_GRAPH_TYPE, 
+                    rbuf, rcnts, (const int *)rdispls, MPI_GRAPH_TYPE, comm_);
             // EDGE_SEARCH_TAG
+            GraphElem tup[2];
             for (int p = 0; p < size_; p++)
             {
                 for (GraphElem k = rptr[p]; k < rptr[p+1]; k+=2)
@@ -208,7 +210,6 @@ class TriangulateAggrFat
                     nghosts_ -= 1;
                 }
             }
-            MPI_Barrier(comm_);
             // communication step 2
             MPI_Alltoall(rinfo, 2, MPI_GRAPH_TYPE, srinfo, 2, MPI_GRAPH_TYPE, comm_);
             for (int p = 0; p < size_; p++)
@@ -216,6 +217,7 @@ class TriangulateAggrFat
                 ntriangles_ += srinfo[p*2];
                 nghosts_ -= srinfo[p*2+1];
             }
+            MPI_Barrier(comm_);
             delete []sdispls;
             delete []rdispls;
             delete []rinfo;
