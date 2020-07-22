@@ -53,10 +53,12 @@
 
 #include <mpi.h>
 
-#ifdef NO_AGGR    
+#if defined(NO_AGGR)    
 #include "tric.hpp"
-#else
+#elif defined(PART_AGGR)
 #include "atric.hpp"
+#else
+#include "fatric.hpp"
 #endif
 
 static std::string inputFileName;
@@ -141,10 +143,12 @@ int main(int argc, char *argv[])
                 << nvRGG << " vertices (in s): " << tdt << std::endl;
     }
 
-#ifdef NO_AGGR    
+#if defined(NO_AGGR)    
     Triangulate tr(g);
-#else
+#elif defined(PART_AGGR)
     TriangulateAggr tr(g);
+#else
+    TriangulateAggrFat tr(g);
 #endif
     MPI_Barrier(MPI_COMM_WORLD);
     
