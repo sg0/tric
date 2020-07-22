@@ -58,7 +58,7 @@
 #elif defined(PART_AGGR)
 #include "atric.hpp"
 #else
-#include "fatric.hpp"
+#include "fastric.hpp"
 #endif
 
 static std::string inputFileName;
