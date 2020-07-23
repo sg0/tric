@@ -85,6 +85,17 @@ extern unsigned seed;
 int is_pwr2(int nprocs) 
 { return ((nprocs != 0) && !(nprocs & (nprocs - 1))); }
 
+// round to multiple of mult
+GraphElem roundUp(GraphElem num, GraphElem mult)
+{
+    if (mult == 0)
+        return num;
+    GraphElem rem = num % mult;
+    if (rem == 0)
+        return num;
+    return num + mult - rem;
+}
+
 // return unint32_t seed
 GraphElem reseeder(unsigned initseed)
 {

@@ -47,7 +47,7 @@
 #include <cstring>
 #include <iomanip>
 
-#define PACK_SIZE (256)
+#define PACK_SIZE (64)
 
 class TriangulateAggrFatDtype
 {
@@ -92,14 +92,15 @@ class TriangulateAggrFatDtype
             for (int p = 0; p < size_; p++)
             {
                 sbuf_disp_[p] = pos;
-                pos += send_counts_[p]*2;
                 in_ghosts_ += recv_counts_[p];
                 out_ghosts_ += send_counts_[p];
-                send_counts_[p] = (send_counts_[p] + PACK_SIZE - 1) / (PACK_SIZE * PACK_SIZE); 
-                recv_counts_[p] = (recv_counts_[p] + PACK_SIZE - 1) / (PACK_SIZE * PACK_SIZE); 
+                send_counts_[p] = roundUp(send_counts_[p]*2, PACK_SIZE); 
+                recv_counts_[p] = roundUp(recv_counts_[p]*2, PACK_SIZE);
+                pos += send_counts_[p];
             }
             nghosts_ = out_ghosts_ + in_ghosts_;
             sbuf_ = new GraphElem[pos];
+            std::memset(sbuf_, 0, pos*sizeof(GraphElem));
         }
 
         ~TriangulateAggrFatDtype() {}
