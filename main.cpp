@@ -57,8 +57,10 @@
 #include "tric.hpp"
 #elif defined(PART_AGGR)
 #include "atric.hpp"
-#else
+#elif defined(ONLY_COLL)
 #include "fastric.hpp"
+#else
+#include "dfastric.hpp"
 #endif
 
 static std::string inputFileName;
@@ -147,8 +149,10 @@ int main(int argc, char *argv[])
     Triangulate tr(g);
 #elif defined(PART_AGGR)
     TriangulateAggr tr(g);
-#else
+#elif defined(ONLY_COLL)
     TriangulateAggrFat tr(g);
+#else
+    TriangulateAggrFatDtype tr(g);
 #endif
     MPI_Barrier(MPI_COMM_WORLD);
     
