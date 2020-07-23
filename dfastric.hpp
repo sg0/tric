@@ -88,17 +88,20 @@ class TriangulateAggrFatDtype
                 }
             }
             MPI_Alltoall(send_counts_, 1, MPI_GRAPH_TYPE, recv_counts_, 1, MPI_GRAPH_TYPE, comm_);
+            for (int p = 0; p < size_; p++)
+            {
+                out_ghosts_ += send_counts_[p];
+                in_ghosts_ += recv_counts_[p];
+                send_counts_[p] = roundUp(send_counts_[p]*2, (GraphElem)PACK_SIZE); 
+            }
+            nghosts_ = out_ghosts_ + in_ghosts_;
+            MPI_Alltoall(send_counts_, 1, MPI_GRAPH_TYPE, recv_counts_, 1, MPI_GRAPH_TYPE, comm_);
             GraphElem pos = 0;
             for (int p = 0; p < size_; p++)
             {
                 sbuf_disp_[p] = pos;
-                in_ghosts_ += recv_counts_[p];
-                out_ghosts_ += send_counts_[p];
-                send_counts_[p] = roundUp(send_counts_[p]*2, PACK_SIZE); 
-                recv_counts_[p] = roundUp(recv_counts_[p]*2, PACK_SIZE);
                 pos += send_counts_[p];
             }
-            nghosts_ = out_ghosts_ + in_ghosts_;
             sbuf_ = new GraphElem[pos];
             std::memset(sbuf_, 0, pos*sizeof(GraphElem));
         }
@@ -189,7 +192,6 @@ class TriangulateAggrFatDtype
             GraphElem *srinfo = new GraphElem[size_*2];
             std::memset(srinfo, 0, sizeof(GraphElem)*size_*2);
             std::memset(rinfo, 0, sizeof(GraphElem)*size_*2);
-            GraphElem *rbuf = new GraphElem[in_ghosts_*2];
             int *scnts = new int[size_];
             int *rcnts = new int[size_];
             MPI_Datatype pack_t;
@@ -200,13 +202,15 @@ class TriangulateAggrFatDtype
                 rptr[p] = dpos;
                 sdispls[p] = spos;
                 rdispls[p] = rpos;
-                scnts[p] = (int)(send_counts_[p] / PACK_SIZE);
-                rcnts[p] = (int)(recv_counts_[p] / PACK_SIZE);
+                scnts[p] = (int)((GraphElem)(send_counts_[p] / (GraphElem)PACK_SIZE));
+                rcnts[p] = (int)((GraphElem)(recv_counts_[p] / (GraphElem)PACK_SIZE));
                 spos += scnts[p];
                 rpos += rcnts[p];
                 dpos += recv_counts_[p];
             }
+            GraphElem *rbuf = new GraphElem[dpos];
             rptr[size_] = dpos;
+            MPI_Barrier(comm_);
             MPI_Alltoallv(sbuf_, scnts, sdispls, pack_t, 
                     rbuf, rcnts, rdispls, pack_t, comm_);
             // EDGE_SEARCH_TAG
@@ -224,6 +228,7 @@ class TriangulateAggrFatDtype
                     nghosts_ -= 1;
                 }
             }
+            MPI_Barrier(comm_);
             // communication step 2
             MPI_Alltoall(rinfo, 2, MPI_GRAPH_TYPE, srinfo, 2, MPI_GRAPH_TYPE, comm_);
             for (int p = 0; p < size_; p++)
@@ -231,7 +236,6 @@ class TriangulateAggrFatDtype
                 ntriangles_ += srinfo[p*2];
                 nghosts_ -= srinfo[p*2+1];
             }
-            MPI_Barrier(comm_);
             MPI_Type_free(&pack_t);
             delete []sdispls;
             delete []rdispls;
@@ -242,6 +246,7 @@ class TriangulateAggrFatDtype
             delete []rcnts;
             delete []rptr;
             GraphElem ttc = 0, ltc = ntriangles_;
+            MPI_Barrier(comm_);
             MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
             return (ttc/3);
         }
