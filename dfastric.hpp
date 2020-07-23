@@ -131,15 +131,13 @@ class TriangulateAggrFatDtype
             {
                 rptr_[p] = rpos;
                 rdispls_[p] = (int)(rpos*sizeof(GraphElem));
-                if ((recv_counts_[p]*2) < std::numeric_limits<int>::max())
+                if (recv_counts_[p] < std::numeric_limits<int>::max())
                 {
                     MPI_Type_contiguous(1, MPI_GRAPH_TYPE, &recv_t_[p]);
-                    recv_counts_[p] *= 2;
-                    rcnts_[p] = recv_counts_[p];
+                    rcnts_[p] = (int)recv_counts_[p];
                 }
                 else 
                 {
-                    recv_counts_[p] = roundUp(recv_counts_[p]*2, PAD_SIZE);
                     MPI_Type_contiguous(PAD_SIZE, MPI_GRAPH_TYPE, &recv_t_[p]);
                     rcnts_[p] = (int)((GraphElem)(recv_counts_[p] / (GraphElem)PAD_SIZE));
                 }
