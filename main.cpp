@@ -61,8 +61,10 @@
 #include "fastric.hpp"
 #elif defined(COLL_DTYPE)
 #include "dfastric.hpp"
-#else
+#elif defined(COLL_BATCH)
 #include "bfastric.hpp"
+#else
+#include "cfastric.hpp"
 #endif
 
 static std::string inputFileName;
@@ -155,8 +157,10 @@ int main(int argc, char *argv[])
     TriangulateAggrFat tr(g);
 #elif defined(COLL_DTYPE)
     TriangulateAggrFatDtype tr(g);
-#else
+#elif defined(COLL_BATCH)
     TriangulateAggrFatBatch tr(g);
+#else
+    TriangulateAggrFatCompressed tr(g);
 #endif
     MPI_Barrier(MPI_COMM_WORLD);
     
