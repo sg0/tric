@@ -48,7 +48,9 @@
 #include <iomanip>
 #include <limits>
 
-#define DEFAULT_BATCH_SIZE   (1000)
+#ifndef DEFAULT_BATCH_SIZE
+#define DEFAULT_BATCH_SIZE   (10000)
+#endif
 class TriangulateAggrFatBatch
 {
     public:
@@ -95,8 +97,10 @@ class TriangulateAggrFatBatch
                 sbuf_disp_[p] = spos;
                 out_ghosts_ += send_counts_[p];
                 in_ghosts_ += recv_counts_[p];
-                spos += (send_counts_[p]*2);
-                rpos += (recv_counts_[p]*2);
+                send_counts_[p] *= 2;
+                recv_counts_[p] *= 2;
+                spos += send_counts_[p];
+                rpos += recv_counts_[p];
             }
             sbuf_ = new GraphElem[spos];
             rbuf_ = new GraphElem[rpos];
@@ -126,9 +130,9 @@ class TriangulateAggrFatBatch
                 for (int i = 0; i < nbatches_; i++)
                 {
 #if defined(DEFAULT_BATCH_SIZE)
-                    batch_send_counts_[p*nbatches_+i] = MIN(DEFAULT_BATCH_SIZE, send_counts_[p]*2);
+                    batch_send_counts_[p*nbatches_+i] = MIN(DEFAULT_BATCH_SIZE, send_counts_[p]);
 #else 
-                    batch_send_counts_[p*nbatches_+i] = MIN(std::numeric_limits<int>::max(), send_counts_[p]*2);
+                    batch_send_counts_[p*nbatches_+i] = MIN(std::numeric_limits<int>::max(), send_counts_[p]);
 #endif            
                     send_counts_[p] -= batch_send_counts_[p*nbatches_+i];
                 }
@@ -281,6 +285,8 @@ class TriangulateAggrFatBatch
             GraphElem ttc = 0, ltc = ntriangles_;
             MPI_Barrier(comm_);
             MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
+            if (rank_ == 0)
+                std::cout << "Number of communication batches: " << nbatches_ << std::endl;
             return (ttc/3);
         }
     private:
