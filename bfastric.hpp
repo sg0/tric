@@ -48,6 +48,7 @@
 #include <iomanip>
 #include <limits>
 
+#define DEFAULT_BATCH_SIZE   (1000)
 class TriangulateAggrFatBatch
 {
     public:
@@ -103,11 +104,19 @@ class TriangulateAggrFatBatch
             GraphElem max_send_count = *std::max_element(send_counts_, send_counts_+size_);
             max_send_count *= 2;
             MPI_Allreduce(MPI_IN_PLACE, &max_send_count, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+#if defined(DEFAULT_BATCH_SIZE)
+            GraphElem batch_size = DEFAULT_BATCH_SIZE;
+#else 
             GraphElem batch_size = (GraphElem)std::numeric_limits<int>::max();
+#endif            
             while(batch_size < max_send_count)
             {
                 nbatches_ += 1;
+#if defined(DEFAULT_BATCH_SIZE)
+                batch_size += (GraphElem)DEFAULT_BATCH_SIZE;
+#else 
                 batch_size += (GraphElem)std::numeric_limits<int>::max();
+#endif            
             }
             batch_send_counts_ = new int[size_*nbatches_];
             batch_recv_counts_ = new int[size_*nbatches_];
@@ -116,7 +125,11 @@ class TriangulateAggrFatBatch
             {
                 for (int i = 0; i < nbatches_; i++)
                 {
+#if defined(DEFAULT_BATCH_SIZE)
+                    batch_send_counts_[p*nbatches_+i] = MIN(DEFAULT_BATCH_SIZE, send_counts_[p]*2);
+#else 
                     batch_send_counts_[p*nbatches_+i] = MIN(std::numeric_limits<int>::max(), send_counts_[p]*2);
+#endif            
                     send_counts_[p] -= batch_send_counts_[p*nbatches_+i];
                 }
             }
