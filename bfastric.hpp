@@ -51,7 +51,7 @@
 
 #ifdef SET_BATCH_SIZE
 #ifndef DEFAULT_BATCH_SIZE
-#define DEFAULT_BATCH_SIZE   (10000)
+#define DEFAULT_BATCH_SIZE   (1073741824)
 #endif
 #endif
 
@@ -131,14 +131,17 @@ class TriangulateAggrFatBatch
             std::memset(batch_send_counts_, 0, size_*nbatches_*sizeof(int));
             for (int p = 0; p < size_; p++)
             {
-                for (int i = 0; i < nbatches_; i++)
+                if (send_counts_[p] > 0)
                 {
+                    for (int i = 0; i < nbatches_; i++)
+                    {
 #if defined(SET_BATCH_SIZE)
-                    batch_send_counts_[p*nbatches_+i] = MIN(DEFAULT_BATCH_SIZE, send_counts_[p]);
+                        batch_send_counts_[p*nbatches_+i] = MIN(DEFAULT_BATCH_SIZE, send_counts_[p]);
 #else 
-                    batch_send_counts_[p*nbatches_+i] = MIN(std::numeric_limits<int>::max(), send_counts_[p]);
+                        batch_send_counts_[p*nbatches_+i] = MIN(std::numeric_limits<int>::max(), send_counts_[p]);
 #endif            
-                    send_counts_[p] -= batch_send_counts_[p*nbatches_+i];
+                        send_counts_[p] -= batch_send_counts_[p*nbatches_+i];
+                    }
                 }
             }
             MPI_Alltoall(batch_send_counts_, nbatches_, MPI_INT, batch_recv_counts_, nbatches_, MPI_INT, comm_);
@@ -241,6 +244,7 @@ class TriangulateAggrFatBatch
                 std::memset(srinfo, 0, sizeof(GraphElem)*size_*2);
                 std::memset(rinfo, 0, sizeof(GraphElem)*size_*2);
                 // communication step 1
+#ifdef USE_ALLTOALLV
                 for (int p = 0; p < size_; p++)
                 {
                     sdispls[p] = (int)spos;
@@ -251,8 +255,35 @@ class TriangulateAggrFatBatch
                     spos +=  (GraphElem)scnts[p];
                     rpos += (GraphElem)rcnts[p];
                 }
-                rptr[size_] = rpos;
                 MPI_Alltoallv(sbuf_, scnts, sdispls, MPI_GRAPH_TYPE, rbuf_, rcnts, rdispls, MPI_GRAPH_TYPE, comm_);
+#else
+                std::vector<MPI_Request> reqs(size_*2, MPI_REQUEST_NULL);
+                for (int p = 0; p < size_; p++)
+                {
+                    rcnts[p] = batch_recv_counts_[p*nbatches_+n];
+                    rptr[p] = rpos;
+                    if (p != rank_)
+                    {
+                        MPI_Irecv(rbuf_ + rpos, rcnts[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p]);
+                    }
+                    else
+                        reqs[p] = MPI_REQUEST_NULL;
+                    rpos += (GraphElem)rcnts[p];
+                }
+                for (int p = 0; p < size_; p++)
+                {
+                    scnts[p] = batch_send_counts_[p*nbatches_+n];
+                    if (p != rank_)
+                    {
+                        MPI_Isend(sbuf_ + spos, scnts[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p+size_]);
+                    }
+                    else
+                        reqs[p+size_] = MPI_REQUEST_NULL;
+                    spos +=  (GraphElem)scnts[p];
+                }
+                MPI_Waitall(size_*2, reqs.data(), MPI_STATUSES_IGNORE);
+#endif
+                rptr[size_] = rpos;
                 // EDGE_SEARCH_TAG
                 GraphElem tup[2];
                 for (int p = 0; p < size_; p++)
