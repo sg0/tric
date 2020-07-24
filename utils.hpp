@@ -63,6 +63,9 @@
 #define SR_Y_DOWN_TAG               107
 #define SR_LCG_TAG                  108
 
+#define MAX(x,y)                    ((x > y) ? (x) : (y))
+#define MIN(x,y)                    ((x < y) ? (x) : (y))
+
 #include <random>
 #include <utility>
 #include <cstring>
