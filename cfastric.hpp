@@ -65,13 +65,10 @@ class TriangulateAggrFatCompressed
             sbuf_ctr_ = new GraphElem[size_];
             sbuf_disp_ = new GraphElem[size_];
             std::memset(send_counts_, 0, sizeof(GraphElem)*size_);
-            std::memset(recv_counts_, 0, sizeof(GraphElem)*size_);
             std::memset(sbuf_ctr_, 0, sizeof(GraphElem)*size_);
             std::memset(sbuf_disp_, 0, sizeof(GraphElem)*(size_));
-            GraphElem *headv_counts = new GraphElem[size_];
             GraphElem *pad_counts = new GraphElem[size_];
             std::memset(pad_counts, 0, sizeof(GraphElem)*(size_));
-            std::memset(headv_counts, 0, sizeof(GraphElem)*(size_));
             const GraphElem lnv = g_->get_lnv();
             for (GraphElem i = 0; i < lnv; i++)
             {
@@ -79,16 +76,16 @@ class TriangulateAggrFatCompressed
                 g_->edge_range(i, e0, e1);
                 if ((e0 + 1) == e1)
                     continue;
+                // calculate ghosts
                 for (GraphElem m = e0; m < e1-1; m++)
                 {
                     Edge const& edge_m = g_->get_edge(m);
                     const int owner = g_->get_owner(edge_m.tail_);
                     if (owner != rank_)
                     {
-                        headv_counts[owner] += 1; // for the original vertex
                         for (GraphElem n = m + 1; n < e1; n++)
-                            send_counts_[owner] += 1; // for ghost vertices
-                        pad_counts[owner] += 1; // for demarcating vertices
+                            send_counts_[owner] += 1; 
+                        pad_counts[owner] += 2;  // extras for head vertex and demarcating vertices
                     }
                 }
             }
@@ -99,19 +96,18 @@ class TriangulateAggrFatCompressed
                 sbuf_disp_[p] = spos;
                 out_ghosts_ += send_counts_[p];
                 in_ghosts_ += recv_counts_[p];
-                send_counts_[p] += (pad_counts[p] + headv_counts[p]);
+                send_counts_[p] += pad_counts[p];
                 spos += send_counts_[p];
             }
             sbuf_ = new GraphElem[spos];
             nghosts_ = out_ghosts_ + in_ghosts_;
-            delete []pad_counts;
-            delete []headv_counts;
             MPI_Alltoall(send_counts_, 1, MPI_GRAPH_TYPE, recv_counts_, 1, MPI_GRAPH_TYPE, comm_);
             for (int p = 0; p < size_; p++)
             {
                 rpos += recv_counts_[p];
             }
             rbuf_ = new GraphElem[rpos];
+            delete []pad_counts;
         }
 
         ~TriangulateAggrFatCompressed() {}
@@ -159,22 +155,25 @@ class TriangulateAggrFatCompressed
                     else
                     {
                         sbuf_[sbuf_disp_[owner]+sbuf_ctr_[owner]] = edge_m.tail_;
+                        sbuf_ctr_[owner] += 1;
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
-                            sbuf_ctr_[owner] += 1;
                             Edge const& edge_n = g_->get_edge(n);
                             sbuf_[sbuf_disp_[owner]+sbuf_ctr_[owner]] = edge_n.tail_;
+                            sbuf_ctr_[owner] += 1;
                         }
-                        sbuf_ctr_[owner] += 1;
                         sbuf_[sbuf_disp_[owner]+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+                        sbuf_ctr_[owner] += 1;
                     }
                 }
             }
         }
-        
+
         inline bool check_edgelist(GraphElem tup[2])
         {
             GraphElem e0, e1;
+            if (g_->get_owner(tup[0]) != rank_)
+                std::cout << "Rank " << rank_ << " does not own vertex ID: " << tup[0] << std::endl;
             const GraphElem lv = g_->global_to_local(tup[0]);
             g_->edge_range(lv, e0, e1);
             for (GraphElem e = e0; e < e1; e++)
@@ -198,66 +197,77 @@ class TriangulateAggrFatCompressed
             GraphElem *rptr = new GraphElem[size_+1];
             int *sdispls = new int[size_];
             int *rdispls = new int[size_];
+            int *scnts = new int[size_];
+            int *rcnts = new int[size_];
             GraphElem spos = 0, rpos = 0;
             std::memset(rptr, 0, sizeof(GraphElem)*(size_+1));
-            std::memset(srinfo, 0, sizeof(GraphElem)*size_*2);
             std::memset(rinfo, 0, sizeof(GraphElem)*size_*2);
             // communication step 1
 #ifdef USE_ALLTOALLV
             for (int p = 0; p < size_; p++)
             {
+                rptr[p] = rpos;
                 sdispls[p] = (int)spos;
                 rdispls[p] = (int)rpos;
-                rptr[p] = rpos;
-                spos += send_counts_[p];
-                rpos += recv_counts_[p];
+                scnts[p] = (int)send_counts_[p];
+                rcnts[p] = (int)recv_counts_[p];
+                spos += scnts[p];
+                rpos += rcnts[p];
             }
-            MPI_Alltoallv(sbuf_, (const int *)send_counts_, sdispls, MPI_GRAPH_TYPE, 
-                    rbuf_, (const int *)recv_counts_, rdispls, MPI_GRAPH_TYPE, comm_);
+            MPI_Alltoallv(sbuf_, scnts, sdispls, MPI_GRAPH_TYPE, 
+                    rbuf_, rcnts, rdispls, MPI_GRAPH_TYPE, comm_);
 #else
             std::vector<MPI_Request> reqs(size_*2, MPI_REQUEST_NULL);
             for (int p = 0; p < size_; p++)
             {
                 rptr[p] = rpos;
+                rcnts[p] = (int)recv_counts_[p];
                 if (p != rank_)
-                    MPI_Irecv(rbuf_ + rpos, (const int)recv_counts_[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p]);
+                    MPI_Irecv(rbuf_ + rpos, rcnts[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p]);
                 else
                     reqs[p] = MPI_REQUEST_NULL;
-                rpos += recv_counts_[p];
+                rpos += rcnts[p];
             }
             for (int p = 0; p < size_; p++)
             {
+                scnts[p] = (int)send_counts_[p];
                 if (p != rank_)
-                    MPI_Isend(sbuf_ + spos, (const int)send_counts_[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p+size_]);
+                    MPI_Isend(sbuf_ + spos, scnts[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p+size_]);
                 else
                     reqs[p+size_] = MPI_REQUEST_NULL;
-                spos += send_counts_[p];
+                spos += scnts[p];
             }
             MPI_Waitall(size_*2, reqs.data(), MPI_STATUSES_IGNORE);
 #endif
             rptr[size_] = rpos;
             // EDGE_SEARCH_TAG
-            GraphElem tup[2];
+            GraphElem tup[2], prev = 0;
             for (int p = 0; p < size_; p++)
             {
                 if (rptr[p] != rptr[p+1])
                 {
-                    for (GraphElem k = rptr[p]; k < rptr[p+1]-1; k++)
+                    for (GraphElem k = rptr[p]; k < rptr[p+1]-1;)
                     {
                         if (rbuf_[k] == -1)
                             continue;
                         tup[0] = rbuf_[k];
-                        GraphElem next = k+1;
-                        while (rbuf_[next])
+                        GraphElem count = 0;
+                        for (GraphElem m = k + 1; m < rptr[p+1]; m++)
                         {
-                            tup[1] = rbuf_[next];
+                            if (rbuf_[m] == -1)
+                            {
+                                count = m + 1;
+                                break;
+                            }
+                            tup[1] = rbuf_[m];
                             if (check_edgelist(tup))
                                 rinfo[p*2] += 1;   // 0 == EDGE_VALID_TAG 
                             else 
                                 rinfo[p*2+1] += 1; // 1 == EDGE_INVALID_TAG 
                             nghosts_ -= 1;
-                            next += 1;
                         }
+                        k += (count - prev);
+                        prev = k;
                     }
                 }
             }
@@ -269,12 +279,13 @@ class TriangulateAggrFatCompressed
                 ntriangles_ += srinfo[p*2];
                 nghosts_ -= srinfo[p*2+1];
             }
-
             delete []rinfo;
             delete []srinfo;
             delete []rptr;
             delete []sdispls;
             delete []rdispls;
+            delete []scnts;
+            delete []rcnts;
             GraphElem ttc = 0, ltc = ntriangles_;
             MPI_Barrier(comm_);
             MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
