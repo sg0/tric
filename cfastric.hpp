@@ -48,6 +48,12 @@
 #include <iomanip>
 #include <limits>
 
+#ifdef SET_BATCH_SIZE
+#ifndef DEFAULT_BATCH_SIZE
+#define DEFAULT_BATCH_SIZE   (1073741824)
+#endif
+#endif
+
 class TriangulateAggrFatCompressed
 {
     public:
@@ -172,8 +178,6 @@ class TriangulateAggrFatCompressed
         inline bool check_edgelist(GraphElem tup[2])
         {
             GraphElem e0, e1;
-            if (g_->get_owner(tup[0]) != rank_)
-                std::cout << "Rank " << rank_ << " does not own vertex ID: " << tup[0] << std::endl;
             const GraphElem lv = g_->global_to_local(tup[0]);
             g_->edge_range(lv, e0, e1);
             for (GraphElem e = e0; e < e1; e++)
@@ -199,47 +203,92 @@ class TriangulateAggrFatCompressed
             int *rdispls = new int[size_];
             int *scnts = new int[size_];
             int *rcnts = new int[size_];
-            GraphElem spos = 0, rpos = 0;
             std::memset(rptr, 0, sizeof(GraphElem)*(size_+1));
             std::memset(rinfo, 0, sizeof(GraphElem)*size_*2);
-            // communication step 1
+            // batch configuration
+            int nbatches = 1;
+            GraphElem max_send_count = *std::max_element(send_counts_, send_counts_+size_);
+            MPI_Allreduce(MPI_IN_PLACE, &max_send_count, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+#if defined(SET_BATCH_SIZE)
+            GraphElem batch_size = DEFAULT_BATCH_SIZE;
+#else 
+            GraphElem batch_size = (GraphElem)std::numeric_limits<int>::max();
+#endif            
+            while(batch_size < max_send_count)
+            {
+                nbatches += 1;
+#if defined(SET_BATCH_SIZE)
+                batch_size += (GraphElem)DEFAULT_BATCH_SIZE;
+#else 
+                batch_size += (GraphElem)std::numeric_limits<int>::max();
+#endif            
+            }
+            int *batch_send_counts = new int[size_*nbatches];
+            int *batch_recv_counts = new int[size_*nbatches];
+            std::memset(batch_send_counts, 0, size_*nbatches*sizeof(int));
+            for (int p = 0; p < size_; p++)
+            {
+                if (send_counts_[p] > 0)
+                {
+                    for (int i = 0; i < nbatches; i++)
+                    {
+#if defined(SET_BATCH_SIZE)
+                        batch_send_counts[p*nbatches+i] = MIN(DEFAULT_BATCH_SIZE, send_counts_[p]);
+#else 
+                        batch_send_counts[p*nbatches+i] = MIN(std::numeric_limits<int>::max(), send_counts_[p]);
+#endif            
+                        send_counts_[p] -= batch_send_counts[p*nbatches+i];
+                    }
+                }
+            }
+            MPI_Alltoall(batch_send_counts, nbatches, MPI_INT, batch_recv_counts, nbatches, MPI_INT, comm_);
+            GraphElem spos = 0, rpos = 0;
+            // batched communication
+            for (int n = 0; n < nbatches; n++)
+            {
 #ifdef USE_ALLTOALLV
-            for (int p = 0; p < size_; p++)
-            {
-                rptr[p] = rpos;
-                sdispls[p] = (int)spos;
-                rdispls[p] = (int)rpos;
-                scnts[p] = (int)send_counts_[p];
-                rcnts[p] = (int)recv_counts_[p];
-                spos += scnts[p];
-                rpos += rcnts[p];
-            }
-            MPI_Alltoallv(sbuf_, scnts, sdispls, MPI_GRAPH_TYPE, 
-                    rbuf_, rcnts, rdispls, MPI_GRAPH_TYPE, comm_);
+                for (int p = 0; p < size_; p++)
+                {
+                    sdispls[p] = (int)spos;
+                    rdispls[p] = (int)rpos;
+                    scnts[p] = batch_send_counts[p*nbatches+n];
+                    rcnts[p] = batch_recv_counts[p*nbatches+n];
+                    spos += scnts[p];
+                    rpos += rcnts[p];
+                }
+                MPI_Alltoallv(sbuf_, scnts, sdispls, MPI_GRAPH_TYPE, 
+                        rbuf_, rcnts, rdispls, MPI_GRAPH_TYPE, comm_);
 #else
-            std::vector<MPI_Request> reqs(size_*2, MPI_REQUEST_NULL);
+                std::vector<MPI_Request> reqs(size_*2, MPI_REQUEST_NULL);
+                for (int p = 0; p < size_; p++)
+                {
+                    rcnts[p] = batch_recv_counts[p*nbatches+n];
+                    if (p != rank_)
+                        MPI_Irecv(rbuf_ + rpos, rcnts[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p]);
+                    else
+                        reqs[p] = MPI_REQUEST_NULL;
+                    rpos += rcnts[p];
+                }
+                for (int p = 0; p < size_; p++)
+                {
+                    scnts[p] = batch_send_counts[p*nbatches+n];
+                    if (p != rank_)
+                        MPI_Isend(sbuf_ + spos, scnts[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p+size_]);
+                    else
+                        reqs[p+size_] = MPI_REQUEST_NULL;
+                    spos += scnts[p];
+                }
+                MPI_Waitall(size_*2, reqs.data(), MPI_STATUSES_IGNORE);
+#endif
+            } // end of batches
+            rpos = 0;
             for (int p = 0; p < size_; p++)
             {
                 rptr[p] = rpos;
-                rcnts[p] = (int)recv_counts_[p];
-                if (p != rank_)
-                    MPI_Irecv(rbuf_ + rpos, rcnts[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p]);
-                else
-                    reqs[p] = MPI_REQUEST_NULL;
-                rpos += rcnts[p];
+                rpos += recv_counts_[p];
             }
-            for (int p = 0; p < size_; p++)
-            {
-                scnts[p] = (int)send_counts_[p];
-                if (p != rank_)
-                    MPI_Isend(sbuf_ + spos, scnts[p], MPI_GRAPH_TYPE, p, 101, comm_, &reqs[p+size_]);
-                else
-                    reqs[p+size_] = MPI_REQUEST_NULL;
-                spos += scnts[p];
-            }
-            MPI_Waitall(size_*2, reqs.data(), MPI_STATUSES_IGNORE);
-#endif
             rptr[size_] = rpos;
+            MPI_Barrier(comm_);
             // EDGE_SEARCH_TAG
             GraphElem tup[2], prev = 0;
             for (int p = 0; p < size_; p++)
@@ -286,9 +335,13 @@ class TriangulateAggrFatCompressed
             delete []rdispls;
             delete []scnts;
             delete []rcnts;
+            delete []batch_send_counts;
+            delete []batch_recv_counts;
             GraphElem ttc = 0, ltc = ntriangles_;
             MPI_Barrier(comm_);
             MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
+            if (rank_ == 0)
+                std::cout << "Number of communication batches: " << nbatches << std::endl;
             return (ttc/3);
         }
     private:
