@@ -150,6 +150,59 @@ class TriangulateEstimate
             MPI_Win_flush_all(twin_);
         }
 
+        // Chung-Lu probability calculation
+        inline void lookup_edges_cl()
+        {
+            MPI_Allreduce(tail_freq_, tail_freq_remote_, nv_, 
+                    MPI_GRAPH_TYPE, MPI_SUM, comm_);
+
+            GraphElem tup[2];
+            GraphElem ne = g_->get_ne();
+
+            for (GraphElem i = 0; i < lnv_; i++)
+            {
+                GraphElem e0, e1;
+                g_->edge_range(i, e0, e1);
+                if ((e0 + 1) == e1)
+                    continue;
+                for (GraphElem m = e0; m < e1-1; m++)
+                {
+                    Edge const& edge_m = g_->get_edge(m);
+                    const int owner = g_->get_owner(edge_m.tail_);
+                    tup[0] = edge_m.tail_;
+                    if (owner == rank_)
+                    {
+                        for (GraphElem n = m + 1; n < e1; n++)
+                        {
+                            Edge const& edge_n = g_->get_edge(n);
+                            tup[1] = edge_n.tail_;
+                            if (does_edge_exist(tup))
+                                ntriangles_ += 1;
+                        }
+                    }
+                    else
+                    {
+                        const GraphWeight ki = (GraphWeight)tail_freq_remote_[edge_m.tail_];
+                        for (GraphElem n = m + 1; n < e1; n++)
+                        {
+                            Edge const& edge_n = g_->get_edge(n);
+                            const GraphWeight kj = (GraphWeight)tail_freq_remote_[edge_n.tail_];
+                            const GraphWeight prob = (ki * kj) / (GraphWeight)(2.0*ne);
+                            if (prob >= p_)
+                                remote_triangles_[owner] += 1;
+                        }
+                    }
+                }
+            }
+            ntriangles_ += std::accumulate(remote_triangles_, remote_triangles_ + size_, 0);
+            for (int p = 0; p < size_; p++)
+            {
+                MPI_Accumulate(&remote_triangles_[p], 1, MPI_GRAPH_TYPE, 
+                                    p, 0, 1, MPI_GRAPH_TYPE, MPI_SUM, twin_);
+            }
+            MPI_Win_flush_all(twin_);
+        }
+
         inline bool does_edge_exist(GraphElem tup[2])
         {
             GraphElem e0, e1;
@@ -182,7 +235,11 @@ class TriangulateEstimate
 
         inline GraphElem count()
         {
+#if defined(USE_CL_MODEL)
+            lookup_edges_cl();
+#else
             lookup_edges();
+#endif
             GraphElem ttc = 0, ltc = ntriangles_;
             MPI_Barrier(comm_);
             MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
