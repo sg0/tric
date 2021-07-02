@@ -183,7 +183,11 @@ int main(int argc, char *argv[])
             << avg_t << std::endl;
 
     if (estimateTriangles)
+#if defined(STM8_ONESIDED)
         std::cout << "Estimated number of triangles: " << ntris << std::endl;
+#else
+        std::cout << "Number of triangles: " << ntris << std::endl;
+#endif
     else
         std::cout << "Number of triangles: " << ntris << std::endl;
 
