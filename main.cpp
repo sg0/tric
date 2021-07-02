@@ -181,11 +181,12 @@ int main(int argc, char *argv[])
     {   double avg_t = (double)(t_tot/(double)nprocs);
         std::cout << "Average execution time (in s) on " << nprocs << " processes: " 
             << avg_t << std::endl;
-#if defined(STM8_ONESIDED)
+
+    if (estimateTriangles)
         std::cout << "Estimated number of triangles: " << ntris << std::endl;
-#else
+    else
         std::cout << "Number of triangles: " << ntris << std::endl;
-#endif
+
         std::cout << "TEPS: " << g->get_ne()/avg_t << std::endl;
         std::cout << "Resolution of MPI_Wtime: " << MPI_Wtick() << std::endl;
     }
