@@ -59,3 +59,5 @@ Possible options (can be combined):
 6.  -r <nranks>     : This is used to control the number of aggregators in MPI I/O and is
                       meaningful when an input binary graph file is passed with option "-f".
                       naggr := (nranks > 1) ? (nprocs/nranks) : nranks;
+7. -o               : Estimate triangle counts - use exact counting for locally owned vertices 
+                      and probabilistic estimate (see macros) for remote. 
