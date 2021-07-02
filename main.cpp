@@ -78,7 +78,6 @@ static bool readBalanced = false;
 static GraphWeight randomEdgePercent = 0.0;
 static bool randomNumberLCG = false;
 static bool estimateTriangles = false;
-static GraphWeight remoteEdgeProbability = 0.005;
 
 // parse command line parameters
 static void parseCommandLine(const int argc, char * const argv[]);
@@ -164,8 +163,7 @@ int main(int argc, char *argv[])
 #elif defined(COLL_BATCH)
     TriangulateAggrFatBatch tr(g);
 #elif defined(STM8_ONESIDED)
-    estimateTriangles = true;
-    TriangulateEstimate tr(g, remoteEdgeProbability);
+    TriangulateEstimate tr(g);
 #else
     TriangulateAggrFatCompressed tr(g);
 #endif
@@ -184,8 +182,7 @@ int main(int argc, char *argv[])
         std::cout << "Average execution time (in s) on " << nprocs << " processes: " 
             << avg_t << std::endl;
 #if defined(STM8_ONESIDED)
-        std::cout << "Estimated number of triangles (w remote edge probability = " 
-            << remoteEdgeProbability << "): " << ntris << std::endl;
+        std::cout << "Estimated number of triangles: " << ntris << std::endl;
 #else
         std::cout << "Number of triangles: " << ntris << std::endl;
 #endif
@@ -205,7 +202,7 @@ void parseCommandLine(const int argc, char * const argv[])
 {
   int ret;
 
-  while ((ret = getopt(argc, argv, "f:r:n:p:o:lb")) != -1) {
+  while ((ret = getopt(argc, argv, "f:r:n:p:olb")) != -1) {
     switch (ret) {
     case 'f':
       inputFileName.assign(optarg);
@@ -228,7 +225,7 @@ void parseCommandLine(const int argc, char * const argv[])
       randomEdgePercent = atof(optarg);
       break;
     case 'o':
-      remoteEdgeProbability = atof(optarg);
+      estimateTriangles = true;
       break;
     default:
       assert(0 && "Should not reach here!!");
@@ -243,12 +240,6 @@ void parseCommandLine(const int argc, char * const argv[])
       std::cout << "Balanced read (option -b) is only applicable for real-world graphs. "
           << "This option does nothing for generated (synthetic) graphs." << std::endl;
   } 
-  
-  if (me == 0 && estimateTriangles && ((remoteEdgeProbability > 1.0) || (remoteEdgeProbability <= 0.0)))
-  {
-      std::cout << "Remote random edge probability is between 0-1, setting to 1/2." << std::endl;
-      remoteEdgeProbability = 0.5;
-  }
 
   // errors
   if (me == 0 && (argc == 1)) 

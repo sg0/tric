@@ -52,9 +52,9 @@ class TriangulateEstimate
 {
     public:
 
-        TriangulateEstimate(Graph* g, GraphWeight p = 0.5): 
+        TriangulateEstimate(Graph* g): 
             g_(g), tail_freq_(nullptr), tail_freq_remote_(nullptr),
-            remote_triangles_(nullptr), ntriangles_(0), p_(p), 
+            remote_triangles_(nullptr), ntriangles_(0), 
             win_(MPI_WIN_NULL), twin_(MPI_WIN_NULL)
         {
             comm_ = g_->get_comm();
@@ -105,7 +105,9 @@ class TriangulateEstimate
         
         inline void lookup_edges()
         {
+            seed = (unsigned)reseeder(1);
             GraphElem tup[2];
+            
             for (GraphElem i = 0; i < lnv_; i++)
             {
                 GraphElem e0, e1;
@@ -188,7 +190,7 @@ class TriangulateEstimate
                             Edge const& edge_n = g_->get_edge(n);
                             const GraphWeight kj = (GraphWeight)tail_freq_remote_[edge_n.tail_];
                             const GraphWeight prob = (ki * kj) / (GraphWeight)(2.0*ne);
-                            if (prob >= p_)
+                            if (genRandom<GraphWeight>(0.0, 1.0) <= prob)
                                 remote_triangles_[owner] += 1;
                         }
                     }
@@ -227,7 +229,7 @@ class TriangulateEstimate
                 if (tail_freq_remote_[i] > 0)
                 {
                     const GraphWeight prob = (GraphWeight)(tail_freq_remote_[i] / (GraphWeight)lnv_pe);
-                    if (prob >= p_)
+                    if (genRandom<GraphWeight>(0.0, 1.0) <= prob)
                         remote_triangles_[pe] += 1;
                 }
             }
@@ -248,7 +250,6 @@ class TriangulateEstimate
     private:
         Graph* g_;
         GraphElem ntriangles_, lnv_, nv_;
-        GraphWeight p_;
 	GraphElem *tail_freq_, *tail_freq_remote_, *remote_triangles_;
 	
         MPI_Win win_, twin_;
