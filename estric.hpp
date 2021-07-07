@@ -83,6 +83,7 @@ class TriangulateEstimate
                     tail_freq_[edge.tail_] += 1;
                 }
             }
+            deg_ = std::accumulate(tail_freq_, tail_freq_ + nv_, 0);
             MPI_Win_create(tail_freq_, nv_, sizeof(GraphElem), 
                     MPI_INFO_NULL, comm_, &win_);
             MPI_Win_create(&ntriangles_, 1, sizeof(GraphElem), 
@@ -230,7 +231,7 @@ class TriangulateEstimate
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)lnv_);
+                            const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)deg_);
                             tup[1] = edge_n.tail_;
                             if (does_edge_exist(tup))
                             {
@@ -331,7 +332,7 @@ class TriangulateEstimate
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)lnv_);
+                            const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)deg_);
                             tup[1] = edge_n.tail_;
                             if (does_edge_exist(tup))
                             {
@@ -458,7 +459,7 @@ class TriangulateEstimate
         }
     private:
         Graph* g_;
-        GraphElem ntriangles_, lnv_, nv_;
+        GraphElem ntriangles_, lnv_, nv_, deg_;
 	GraphElem *tail_freq_, *tail_freq_remote_, *remote_triangles_;
 	
         MPI_Win win_, twin_;
