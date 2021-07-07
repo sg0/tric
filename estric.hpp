@@ -59,7 +59,7 @@ class TriangulateEstimate
 
         TriangulateEstimate(Graph* g): 
             g_(g), tail_freq_(nullptr), tail_freq_remote_(nullptr),
-            remote_triangles_(nullptr), ntriangles_(0), nedges_(0), 
+            remote_triangles_(nullptr), ntriangles_(0),  
             win_(MPI_WIN_NULL), twin_(MPI_WIN_NULL)
         {
             comm_ = g_->get_comm();
@@ -70,7 +70,6 @@ class TriangulateEstimate
             tail_freq_ = new GraphElem[nv_];
             tail_freq_remote_ = new GraphElem[nv_];
             remote_triangles_ = new GraphElem[size_];
-            nedges_ = new GraphElem[size_];
             std::fill(tail_freq_, tail_freq_ + nv_, 0);
             std::fill(tail_freq_remote_, tail_freq_remote_ + nv_, 0);
             std::fill(remote_triangles_, remote_triangles_ + size_, 0);
@@ -85,11 +84,8 @@ class TriangulateEstimate
                 }
             }
             GraphElem lne = g_->get_lne();
-            MPI_Alltoall(&lne, 1, MPI_GRAPH_TYPE, nedges_, 1, MPI_GRAPH_TYPE, comm_);
-            MPI_Win_create(tail_freq_, nv_, sizeof(GraphElem), 
-                    MPI_INFO_NULL, comm_, &win_);
-            MPI_Win_create(&ntriangles_, 1, sizeof(GraphElem), 
-                    MPI_INFO_NULL, comm_, &twin_);
+            MPI_Win_create(tail_freq_, nv_, sizeof(GraphElem), MPI_INFO_NULL, comm_, &win_);
+            MPI_Win_create(&ntriangles_, 1, sizeof(GraphElem), MPI_INFO_NULL, comm_, &twin_);
             MPI_Win_lock_all(MPI_MODE_NOCHECK, win_);
             MPI_Win_lock_all(MPI_MODE_NOCHECK, twin_);
         }
@@ -215,8 +211,6 @@ class TriangulateEstimate
         {
             GraphElem tup[2];
             GraphElem tot = 0, tpos = 0, tneg = 0, fneg = 0;
-            GraphElem max_deg = *std::max_element(tail_freq_, tail_freq_ + nv_);
-            GraphWeight max_prob = std::ceil((GraphWeight)(max_deg / (GraphWeight)nedges_[rank_]));
             
             // local
             for (GraphElem i = 0; i < lnv_; i++)
@@ -235,8 +229,8 @@ class TriangulateEstimate
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(nedges_[rank_]));
-                            GraphWeight pcut = genRandom<GraphWeight>(PTOL, max_prob); 
+                            const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(nv_));
+                            GraphWeight pcut = genRandom<GraphWeight>(PTOL, 1.0); 
                             tup[1] = edge_n.tail_;
                             if (does_edge_exist(tup))
                             {
@@ -267,8 +261,7 @@ class TriangulateEstimate
             GraphWeight gfneg = (GraphWeight)(acc_tot_sum[3] / (GraphWeight)acc_tot_sum[0]);
             GraphWeight se = gtpos / (gtpos + gtneg);
             GraphWeight sp = gtpos / (gtpos + gfneg);
-            GraphWeight dse = (1.0 - se), dsp = (1.0 - sp);
-            GraphWeight d = std::sqrt(dse*dse + dsp*dsp);
+            GraphWeight d = 2*se*sp / (se + sp);
 
             if (std::isnan(d))
               d = PTOL;
@@ -339,7 +332,7 @@ class TriangulateEstimate
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(nedges_[rank_]));
+                            const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(nv_));
                             GraphWeight pcut = genRandom<GraphWeight>(PTOL, 1.0); 
                             tup[1] = edge_n.tail_;
                             if (does_edge_exist(tup))
@@ -370,8 +363,7 @@ class TriangulateEstimate
             GraphWeight gfneg = (GraphWeight)(acc_tot_sum[3] / (GraphWeight)acc_tot_sum[0]);
             GraphWeight se = gtpos / (gtpos + gtneg);
             GraphWeight sp = gtpos / (gtpos + gfneg);
-            GraphWeight dse = (1.0 - se), dsp = (1.0 - sp);
-            GraphWeight d = std::sqrt(dse*dse + dsp*dsp);
+            GraphWeight d = 2*se*sp / (se + sp);
 
             if (std::isnan(d))
                 d = PTOL;
@@ -432,12 +424,11 @@ class TriangulateEstimate
 
         void calc_remote_triangles(const int pe, GraphWeight d = 1.0)
         {
-            const GraphElem lne_pe = nedges_[pe];
             for (GraphElem i = 0; i < nv_; i++)
             {
                 if (tail_freq_remote_[i] > 0)
                 {
-                    const GraphWeight prob = (GraphWeight)(tail_freq_remote_[i] / (GraphWeight)lne_pe);
+                    const GraphWeight prob = (GraphWeight)(tail_freq_remote_[i] / (GraphWeight)nv_);
                     if (genRandom<GraphWeight>(PTOL, d) <= prob)
                         remote_triangles_[pe] += 1;
                 }
@@ -470,7 +461,7 @@ class TriangulateEstimate
     private:
         Graph* g_;
         GraphElem ntriangles_, lnv_, nv_;
-	GraphElem *tail_freq_, *tail_freq_remote_, *remote_triangles_, *nedges_;
+	GraphElem *tail_freq_, *tail_freq_remote_, *remote_triangles_;
 	
         MPI_Win win_, twin_;
         int rank_, size_;
