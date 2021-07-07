@@ -215,6 +215,8 @@ class TriangulateEstimate
         {
             GraphElem tup[2];
             GraphElem tot = 0, tpos = 0, tneg = 0, fneg = 0;
+            GraphElem max_deg = *std::max_element(tail_freq_, tail_freq_ + nv_);
+            GraphWeight max_prob = std::ceil((GraphWeight)(max_deg / (GraphWeight)nedges_[rank_]));
             
             // local
             for (GraphElem i = 0; i < lnv_; i++)
@@ -234,7 +236,7 @@ class TriangulateEstimate
                         {
                             Edge const& edge_n = g_->get_edge(n);
                             const GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(nedges_[rank_]));
-                            GraphWeight pcut = genRandom<GraphWeight>(PTOL, 1.0); 
+                            GraphWeight pcut = genRandom<GraphWeight>(PTOL, max_prob); 
                             tup[1] = edge_n.tail_;
                             if (does_edge_exist(tup))
                             {
@@ -353,6 +355,7 @@ class TriangulateEstimate
                                 if (pcut > prob)
                                     tneg += 1;
                             }
+
                             tot += 1;
                         }
                     }
