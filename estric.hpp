@@ -77,7 +77,6 @@ class TriangulateEstimate
             {
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
-                GraphElem const i_g = g_->local_to_global(i);
                 for (GraphElem m = e0; m < e1; m++)
                 {
                     Edge const& edge = g_->get_edge(m);
@@ -253,7 +252,6 @@ class TriangulateEstimate
                 }
             }
             
-
             GraphWeight acc[4] = {tot, tpos, tneg, fneg}, 
                         acc_tot_sum[4] = {0.0, 0.0, 0.0, 0.0};
             MPI_Allreduce(acc, acc_tot_sum, 4, MPI_WEIGHT_TYPE, MPI_SUM, comm_);
@@ -262,10 +260,8 @@ class TriangulateEstimate
             acc_tot_sum[3] = acc_tot_sum[3] / acc_tot_sum[0];
             GraphWeight se = acc_tot_sum[1] / (acc_tot_sum[1] + acc_tot_sum[2]);
             GraphWeight sp = acc_tot_sum[1] / (acc_tot_sum[1] + acc_tot_sum[3]);
-            GraphWeight dse = (1.0 - se), dsp = (1.0 - sp);
-            GraphWeight d_loc = 0.0, d = 0.0;
-            d_loc = std::sqrt(dse*dse + dsp*dsp);
-            MPI_Allreduce(&d_loc, &d, 1, MPI_WEIGHT_TYPE, MPI_MIN, comm_);
+            GraphWeight d = 2*se*sp / (se + sp);
+            
             if (std::isnan(d))
               d = PTOL;
             
@@ -364,10 +360,8 @@ class TriangulateEstimate
             acc_tot_sum[3] = acc_tot_sum[3] / acc_tot_sum[0];
             GraphWeight se = acc_tot_sum[1] / (acc_tot_sum[1] + acc_tot_sum[2]);
             GraphWeight sp = acc_tot_sum[1] / (acc_tot_sum[1] + acc_tot_sum[3]);
-            GraphWeight dse = (1.0 - se), dsp = (1.0 - sp);
-            GraphWeight d_loc = 0.0, d = 0.0;
-            d_loc = std::sqrt(dse*dse + dsp*dsp);
-            MPI_Allreduce(&d_loc, &d, 1, MPI_WEIGHT_TYPE, MPI_MIN, comm_);
+            GraphWeight d = 2*se*sp / (se + sp);
+            
             if (std::isnan(d))
                 d = PTOL;
             
