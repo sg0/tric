@@ -212,7 +212,7 @@ class TriangulateEstimate
         inline GraphWeight lookup_edges_phases()
         {
             GraphElem tup[2];
-            GraphWeight tpos = 0.0, tneg = 0.0, fneg = 0.0;
+            GraphWeight tot = 0.0, tpos = 0.0, tneg = 0.0, fneg = 0.0;
             
             // local
             for (GraphElem i = 0; i < lnv_; i++)
@@ -246,23 +246,21 @@ class TriangulateEstimate
                                 if (genRandom<GraphWeight>(PTOL, 1.0) > prob)
                                     tneg += 1.0;
                             }
+
+                            tot += 1.0;
                         }
                     }
                 }
             }
             
-            GraphWeight acc[3] = {tpos, tneg, fneg}, 
-                        acc_tot_sum[3] = {0.0, 0.0, 0.0}, 
-                        acc_tot_max[3] = {0.0, 0.0, 0.0}, 
-                        acc_tot_min[3] = {0.0, 0.0, 0.0};
-            MPI_Allreduce(acc, acc_tot_sum, 3, MPI_WEIGHT_TYPE, MPI_SUM, comm_);
-            MPI_Allreduce(acc_tot_sum, acc_tot_max, 3, MPI_WEIGHT_TYPE, MPI_MAX, comm_);
-            MPI_Allreduce(acc_tot_sum, acc_tot_min, 3, MPI_WEIGHT_TYPE, MPI_MIN, comm_);
-            acc_tot_sum[0] = (acc_tot_sum[0] - acc_tot_min[0]) / (acc_tot_max[0] - acc_tot_min[0]);
-            acc_tot_sum[1] = (acc_tot_sum[1] - acc_tot_min[1]) / (acc_tot_max[1] - acc_tot_min[1]);
-            acc_tot_sum[2] = (acc_tot_sum[2] - acc_tot_min[2]) / (acc_tot_max[2] - acc_tot_min[2]);
-            GraphWeight se = acc_tot_sum[0] / (acc_tot_sum[0] + acc_tot_sum[1]);
-            GraphWeight sp = acc_tot_sum[0] / (acc_tot_sum[0] + acc_tot_sum[2]);
+            GraphWeight acc[4] = {tot, tpos, tneg, fneg}, 
+                        acc_tot_sum[4] = {0.0, 0.0, 0.0, 0.0};
+            MPI_Allreduce(acc, acc_tot_sum, 4, MPI_WEIGHT_TYPE, MPI_SUM, comm_);
+            acc_tot_sum[1] = acc_tot_sum[1] / acc_tot_sum[0];
+            acc_tot_sum[2] = acc_tot_sum[2] / acc_tot_sum[0];
+            acc_tot_sum[3] = acc_tot_sum[3] / acc_tot_sum[0];
+            GraphWeight se = acc_tot_sum[1] / (acc_tot_sum[1] + acc_tot_sum[2]);
+            GraphWeight sp = acc_tot_sum[1] / (acc_tot_sum[1] + acc_tot_sum[3]);
             GraphWeight d = (2.0*se*sp) / (se + sp);
             if (std::isnan(d))
               d = PTOL;
@@ -312,7 +310,7 @@ class TriangulateEstimate
 
             GraphElem tup[2];
             GraphElem ne = g_->get_ne();
-            GraphWeight tpos = 0.0, tneg = 0.0, fneg = 0.0;
+            GraphWeight tot = 0.0, tpos = 0.0, tneg = 0.0, fneg = 0.0;
 
             // local
             for (GraphElem i = 0; i < lnv_; i++)
@@ -348,27 +346,24 @@ class TriangulateEstimate
                                 if (genRandom<GraphWeight>(PTOL, 1.0) > prob)
                                     tneg += 1.0;
                             }
+                            tot += 1.0;
                         }
                     }
                 }
             }
              
-            GraphWeight acc[3] = {tpos, tneg, fneg}, 
-                        acc_tot_sum[3] = {0.0, 0.0, 0.0}, 
-                        acc_tot_max[3] = {0.0, 0.0, 0.0}, 
-                        acc_tot_min[3] = {0.0, 0.0, 0.0};
-            MPI_Allreduce(acc, acc_tot_sum, 3, MPI_WEIGHT_TYPE, MPI_SUM, comm_);
-            MPI_Allreduce(acc_tot_sum, acc_tot_max, 3, MPI_WEIGHT_TYPE, MPI_MAX, comm_);
-            MPI_Allreduce(acc_tot_sum, acc_tot_min, 3, MPI_WEIGHT_TYPE, MPI_MIN, comm_);
-            acc_tot_sum[0] = (acc_tot_sum[0] - acc_tot_min[0]) / (acc_tot_max[0] - acc_tot_min[0]);
-            acc_tot_sum[1] = (acc_tot_sum[1] - acc_tot_min[1]) / (acc_tot_max[1] - acc_tot_min[1]);
-            acc_tot_sum[2] = (acc_tot_sum[2] - acc_tot_min[2]) / (acc_tot_max[2] - acc_tot_min[2]);
-            GraphWeight se = acc_tot_sum[0] / (acc_tot_sum[0] + acc_tot_sum[1]);
-            GraphWeight sp = acc_tot_sum[0] / (acc_tot_sum[0] + acc_tot_sum[2]);
+            GraphWeight acc[4] = {tot, tpos, tneg, fneg}, 
+                        acc_tot_sum[4] = {0.0, 0.0, 0.0, 0.0};
+            MPI_Allreduce(acc, acc_tot_sum, 4, MPI_WEIGHT_TYPE, MPI_SUM, comm_);
+            acc_tot_sum[1] = acc_tot_sum[1] / acc_tot_sum[0];
+            acc_tot_sum[2] = acc_tot_sum[2] / acc_tot_sum[0];
+            acc_tot_sum[3] = acc_tot_sum[3] / acc_tot_sum[0];
+            GraphWeight se = acc_tot_sum[1] / (acc_tot_sum[1] + acc_tot_sum[2]);
+            GraphWeight sp = acc_tot_sum[1] / (acc_tot_sum[1] + acc_tot_sum[3]);
             GraphWeight d = (2.0*se*sp) / (se + sp);
             if (std::isnan(d))
-              d = PTOL;
-             
+                d = PTOL;
+            
             // remote
             for (GraphElem i = 0; i < lnv_; i++)
             {
