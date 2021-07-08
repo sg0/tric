@@ -58,9 +58,9 @@ class TriangulateEstimate
     public:
 
         TriangulateEstimate(Graph* g): 
-            g_(g), tail_freq_(nullptr), tail_freq_remote_(0),
+            g_(g), tail_freq_(nullptr), tail_freq_remote_(0), 
             remote_triangles_(nullptr), ntriangles_(0), targets_(0), pindex_(0), 
-            win_(MPI_WIN_NULL), twin_(MPI_WIN_NULL)
+            nedges_(0), win_(MPI_WIN_NULL), twin_(MPI_WIN_NULL)
         {
             comm_ = g_->get_comm();
             lnv_ = g_->get_lnv();
@@ -69,13 +69,14 @@ class TriangulateEstimate
             MPI_Comm_rank(comm_, &rank_);
             tail_freq_ = new GraphElem[nv_];
             remote_triangles_ = new GraphElem[size_];
+            nedges_ = new GraphElem[size_];
             std::fill(tail_freq_, tail_freq_ + nv_, 0);
             std::fill(remote_triangles_, remote_triangles_ + size_, 0);
             for (GraphElem i = 0; i < lnv_; i++)
             {
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
-                tail_freq_[g_->local_to_global(i)] += 1;
+                //tail_freq_[g_->local_to_global(i)] += 1;
                 for (GraphElem m = e0; m < e1; m++)
                 {
                     Edge const& edge = g_->get_edge(m);
@@ -83,6 +84,7 @@ class TriangulateEstimate
                 }
             }
             GraphElem lne = g_->get_lne();
+            MPI_Alltoall(&lne, 1, MPI_GRAPH_TYPE, nedges_, 1, MPI_GRAPH_TYPE, comm_);
             MPI_Win_create(tail_freq_, nv_, sizeof(GraphElem), MPI_INFO_NULL, comm_, &win_);
             MPI_Win_create(&ntriangles_, 1, sizeof(GraphElem), MPI_INFO_NULL, comm_, &twin_);
             MPI_Win_lock_all(MPI_MODE_NOCHECK, win_);
@@ -96,6 +98,7 @@ class TriangulateEstimate
             MPI_Win_unlock_all(win_);
             MPI_Win_unlock_all(twin_);
             tail_freq_remote_.clear();
+            delete []nedges_;
             delete []tail_freq_;
             delete []remote_triangles_;
         }
@@ -105,7 +108,7 @@ class TriangulateEstimate
         {
         }
 
-
+#if 0       
         inline GraphWeight lookup_edges()
         {
             GraphElem tup[2];
@@ -124,12 +127,10 @@ class TriangulateEstimate
                     tup[0] = edge_m.tail_;
                     if (owner == rank_)
                     {
-                        GraphWeight prob_m = (GraphWeight)(tail_freq_[edge_m.tail_] / (GraphWeight)(nv_));
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(nv_));
-                            prob += prob_m;
+                            GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(nedges_[rank]));
                             GraphWeight pcut = genRandom<GraphWeight>(PTOL, 1.0); 
                             tup[1] = edge_n.tail_;
                             if (does_edge_exist(tup))
@@ -197,13 +198,11 @@ class TriangulateEstimate
                     const int owner = g_->get_owner(edge_m.tail_);
                     if (owner != rank_)
                     {
-                        GraphWeight prob_m = (GraphWeight)(tail_freq_remote_[edge_m.tail_] / (GraphWeight)(nv_));
                         GraphElem start_idx = (GraphElem)pindex_[owner] * nv_;
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(nv_));
-                            prob += prob_m;
+                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(nedges_[owner]));
 
                             if (genRandom<GraphWeight>(PTOL, d) <= prob)
                                 remote_triangles_[owner] += 1;
@@ -221,13 +220,12 @@ class TriangulateEstimate
             
             return d;
         }
+#endif
 
-#if 0       
         inline void lookup_edges()
         {
             GraphElem tup[2];
             
-            // local
             for (GraphElem i = 0; i < lnv_; i++)
             {
                 GraphElem e0, e1;
@@ -285,13 +283,11 @@ class TriangulateEstimate
                     const int owner = g_->get_owner(edge_m.tail_);
                     if (owner != rank_)
                     {
-                        GraphWeight prob_m = (GraphWeight)(tail_freq_remote_[edge_m.tail_] / (GraphWeight)(nv_));
                         GraphElem start_idx = (GraphElem)pindex_[owner] * nv_;
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(nv_));
-                            prob += prob_m;
+                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(nedges_[owner]));
 
                             if (genRandom<GraphWeight>(PTOL, 1.0) <= prob)
                                 remote_triangles_[owner] += 1;
@@ -307,7 +303,6 @@ class TriangulateEstimate
             }
             MPI_Win_flush_all(twin_);
         }
-#endif
 
         inline bool does_edge_exist(GraphElem tup[2])
         {
@@ -327,12 +322,12 @@ class TriangulateEstimate
 
         inline GraphElem count()
         {
+#if 0
             GraphWeight d = lookup_edges();
             if (rank_ == 0)
                 std::cout << "Calculated probability threshold: " << d << std::endl;
-#if 0
-            lookup_edges();
 #endif       
+            lookup_edges();
             MPI_Barrier(comm_);
             
             GraphElem ttc = 0, ltc = ntriangles_;
@@ -344,7 +339,7 @@ class TriangulateEstimate
     private:
         Graph* g_;
         GraphElem ntriangles_, lnv_, nv_;
-	GraphElem *tail_freq_, *remote_triangles_;
+	GraphElem *tail_freq_, *remote_triangles_, *nedges_;
 
         std::vector<int> targets_;
         std::vector<GraphElem> tail_freq_remote_; 
