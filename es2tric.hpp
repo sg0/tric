@@ -95,8 +95,8 @@ class TriangulateEstimate
         {
             MPI_Win_unlock_all(win_);
             MPI_Win_unlock_all(twin_);
-            delete []tail_freq_;
             tail_freq_remote_.clear();
+            delete []tail_freq_;
             delete []remote_triangles_;
         }
 
@@ -169,9 +169,7 @@ class TriangulateEstimate
             GraphWeight gfneg = (GraphWeight)(acc_tot_sum[3] / (GraphWeight)acc_tot_sum[0]);
             GraphWeight se = gtpos / (gtpos + gtneg);
             GraphWeight sp = gtpos / (gtpos + gfneg);
-            //GraphWeight d = 2.0*se*sp / (se + sp);
-            GraphWeight dse = (1.0 - se), dsp = (1.0 - sp);
-            GraphWeight d = std::sqrt(dse*dse + dsp*dsp);
+            GraphWeight d = 2.0*se*sp / (se + sp);
 
             if (std::isnan(d))
               d = PTOL;
