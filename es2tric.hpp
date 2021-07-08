@@ -104,13 +104,13 @@ class TriangulateEstimate
         inline void check()
         {
         }
-        
+
+
         inline GraphWeight lookup_edges()
         {
             GraphElem tup[2];
             GraphElem tot = 0, tpos = 0, tneg = 0, fneg = 0;
             
-            // local
             for (GraphElem i = 0; i < lnv_; i++)
             {
                 GraphElem e0, e1;
@@ -195,11 +195,10 @@ class TriangulateEstimate
                 {
                     Edge const& edge_m = g_->get_edge(m);
                     const int owner = g_->get_owner(edge_m.tail_);
-                    tup[0] = edge_m.tail_;
                     if (owner != rank_)
                     {
+                        GraphWeight prob_m = (GraphWeight)(tail_freq_remote_[edge_m.tail_] / (GraphWeight)(nv_));
                         GraphElem start_idx = (GraphElem)pindex_[owner] * nv_;
-                        GraphWeight prob_m = (GraphWeight)(tail_freq_remote_[start_idx + edge_m.tail_] / (GraphWeight)(nv_));
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
@@ -222,6 +221,93 @@ class TriangulateEstimate
             
             return d;
         }
+        
+#if 0
+        inline void lookup_edges()
+        {
+            GraphElem tup[2];
+            
+            // local
+            for (GraphElem i = 0; i < lnv_; i++)
+            {
+                GraphElem e0, e1;
+                g_->edge_range(i, e0, e1);
+                if ((e0 + 1) == e1)
+                    continue;
+                for (GraphElem m = e0; m < e1-1; m++)
+                {
+                    Edge const& edge_m = g_->get_edge(m);
+                    const int owner = g_->get_owner(edge_m.tail_);
+                    tup[0] = edge_m.tail_;
+                    if (owner == rank_)
+                    {
+                        for (GraphElem n = m + 1; n < e1; n++)
+                        {
+                            Edge const& edge_n = g_->get_edge(n);
+                            tup[1] = edge_n.tail_;
+                            if (does_edge_exist(tup))
+                                ntriangles_ += 1;
+                        }
+                    }
+                    else
+                    {
+                        if (std::find(targets_.begin(), targets_.end(), owner) 
+                                == targets_.end())
+                            targets_.push_back(owner);
+                    }
+                }
+            }
+
+            for (int i = 0; i < targets_.size(); i++)
+                pindex_.insert({targets_[i], i});
+             
+            tail_freq_remote_.resize(targets_.size()*nv_);
+            
+            for (int p = 0; p < targets_.size(); p++)
+            {
+                MPI_Get(&tail_freq_remote_[p*nv_], nv_, MPI_GRAPH_TYPE, 
+                        targets_[p], 0, nv_, MPI_GRAPH_TYPE, win_);
+            }
+            
+            MPI_Win_flush_all(win_);
+            MPI_Barrier(comm_);
+            
+            for (GraphElem i = 0; i < lnv_; i++)
+            {
+                GraphElem e0, e1;
+                g_->edge_range(i, e0, e1);
+                if ((e0 + 1) == e1)
+                    continue;
+
+                for (GraphElem m = e0; m < e1-1; m++)
+                {
+                    Edge const& edge_m = g_->get_edge(m);
+                    const int owner = g_->get_owner(edge_m.tail_);
+                    if (owner != rank_)
+                    {
+                        GraphWeight prob_m = (GraphWeight)(tail_freq_remote_[edge_m.tail_] / (GraphWeight)(nv_));
+                        GraphElem start_idx = (GraphElem)pindex_[owner] * nv_;
+                        for (GraphElem n = m + 1; n < e1; n++)
+                        {
+                            Edge const& edge_n = g_->get_edge(n);
+                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(nv_));
+                            prob += prob_m;
+
+                            if (genRandom<GraphWeight>(PTOL, 1.0) <= prob)
+                                remote_triangles_[owner] += 1;
+                        }
+                    }
+                }
+            }
+            ntriangles_ += std::accumulate(remote_triangles_, remote_triangles_ + size_, 0);
+            for (int p = 0; p < size_; p++)
+            {
+                MPI_Accumulate(&remote_triangles_[p], 1, MPI_GRAPH_TYPE, 
+                        p, 0, 1, MPI_GRAPH_TYPE, MPI_SUM, twin_);
+            }
+            MPI_Win_flush_all(twin_);
+        }
+#endif
 
         inline bool does_edge_exist(GraphElem tup[2])
         {
@@ -242,12 +328,13 @@ class TriangulateEstimate
         inline GraphElem count()
         {
             GraphWeight d = lookup_edges();
-            
-            MPI_Barrier(comm_);
-            
             if (rank_ == 0)
                 std::cout << "Calculated probability threshold: " << d << std::endl;
-
+#if 0
+            lookup_edges();
+#endif       
+            MPI_Barrier(comm_);
+            
             GraphElem ttc = 0, ltc = ntriangles_;
             MPI_Barrier(comm_);
             MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
