@@ -437,7 +437,7 @@ class TriangulateEstimate
 
         inline GraphElem count()
         {
-#if defined(USE_EUCLIDEAN_CLASSIFIER)
+#if defined(USE_CUTOFF_PROBABILITY)
             GraphWeight d;
 #if defined(USE_CL_MODEL)
             d = lookup_edges_cl_phases();

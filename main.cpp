@@ -65,6 +65,8 @@
 #include "bfastric.hpp"
 #elif defined(STM8_ONESIDED)
 #include "estric.hpp"
+#elif defined(ESTIMATE_COUNTS)
+#include "es2tric.hpp"
 #else // aggregate compressed
 #include "cfastric.hpp"
 #endif
@@ -162,7 +164,7 @@ int main(int argc, char *argv[])
     TriangulateAggrFatDtype tr(g);
 #elif defined(COLL_BATCH)
     TriangulateAggrFatBatch tr(g);
-#elif defined(STM8_ONESIDED)
+#elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
     TriangulateEstimate tr(g);
 #else
     TriangulateAggrFatCompressed tr(g);
@@ -183,7 +185,7 @@ int main(int argc, char *argv[])
             << avg_t << std::endl;
 
     if (estimateTriangles)
-#if defined(STM8_ONESIDED)
+#if defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
         std::cout << "Estimated number of triangles: " << ntris << std::endl;
 #else
         std::cout << "Number of triangles: " << ntris << std::endl;
