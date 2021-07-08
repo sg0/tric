@@ -169,7 +169,9 @@ class TriangulateEstimate
             GraphWeight gfneg = (GraphWeight)(acc_tot_sum[3] / (GraphWeight)acc_tot_sum[0]);
             GraphWeight se = gtpos / (gtpos + gtneg);
             GraphWeight sp = gtpos / (gtpos + gfneg);
-            GraphWeight d = 2.0*se*sp / (se + sp);
+            //GraphWeight d = 2.0*se*sp / (se + sp);
+            GraphWeight dse = (1.0 - se), dsp = (1.0 - sp);
+            GraphWeight d = std::sqrt(dse*dse + dsp*dsp);
 
             if (std::isnan(d))
               d = PTOL;
@@ -221,8 +223,8 @@ class TriangulateEstimate
             
             return d;
         }
-        
-#if 0
+
+#if 0       
         inline void lookup_edges()
         {
             GraphElem tup[2];
