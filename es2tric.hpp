@@ -257,6 +257,7 @@ class TriangulateEstimate
                 }
             }
 
+            MPI_Win_sync(twin_);
             for (int i = 0; i < targets_.size(); i++)
                 pindex_.insert({targets_[i], i});
              
@@ -297,6 +298,7 @@ class TriangulateEstimate
                 }
             }
             ntriangles_ += std::accumulate(remote_triangles_, remote_triangles_ + size_, 0);
+            MPI_Win_sync(twin_);
             for (int p = 0; p < size_; p++)
             {
                 MPI_Accumulate(&remote_triangles_[p], 1, MPI_GRAPH_TYPE, 
