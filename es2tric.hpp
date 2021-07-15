@@ -60,7 +60,7 @@ class TriangulateEstimate
         TriangulateEstimate(Graph* g): 
             g_(g), tail_freq_(nullptr), tail_freq_remote_(0), 
             remote_triangles_(nullptr), ntriangles_(0), targets_(0), pindex_(0), 
-            nedges_(0), win_(MPI_WIN_NULL), twin_(MPI_WIN_NULL)
+            degree_(0), win_(MPI_WIN_NULL), twin_(MPI_WIN_NULL)
         {
             comm_ = g_->get_comm();
             lnv_ = g_->get_lnv();
@@ -69,22 +69,23 @@ class TriangulateEstimate
             MPI_Comm_rank(comm_, &rank_);
             tail_freq_ = new GraphElem[nv_];
             remote_triangles_ = new GraphElem[size_];
-            nedges_ = new GraphElem[size_];
+            degree_ = new GraphElem[nv_];
             std::fill(tail_freq_, tail_freq_ + nv_, 0);
             std::fill(remote_triangles_, remote_triangles_ + size_, 0);
             for (GraphElem i = 0; i < lnv_; i++)
             {
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
-                //tail_freq_[g_->local_to_global(i)] += 1;
+                const GraphElem idx = g_->local_to_global(i);
+                degree_[idx] = e1 - e0 + 1;
                 for (GraphElem m = e0; m < e1; m++)
                 {
                     Edge const& edge = g_->get_edge(m);
                     tail_freq_[edge.tail_] += 1;
                 }
             }
+            MPI_Allreduce(MPI_IN_PLACE, degree_, nv_, MPI_GRAPH_TYPE, MPI_SUM, comm_);
             GraphElem lne = g_->get_lne();
-            MPI_Alltoall(&lne, 1, MPI_GRAPH_TYPE, nedges_, 1, MPI_GRAPH_TYPE, comm_);
             MPI_Win_create(tail_freq_, nv_, sizeof(GraphElem), MPI_INFO_NULL, comm_, &win_);
             MPI_Win_create(&ntriangles_, 1, sizeof(GraphElem), MPI_INFO_NULL, comm_, &twin_);
             MPI_Win_lock_all(MPI_MODE_NOCHECK, win_);
@@ -98,7 +99,7 @@ class TriangulateEstimate
             MPI_Win_unlock_all(win_);
             MPI_Win_unlock_all(twin_);
             tail_freq_remote_.clear();
-            delete []nedges_;
+            delete []degree_;
             delete []tail_freq_;
             delete []remote_triangles_;
         }
@@ -130,7 +131,7 @@ class TriangulateEstimate
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(nedges_[rank]));
+                            GraphWeight prob = (GraphWeight)(tail_freq_[edge_n.tail_] / (GraphWeight)(degree_[edge_n.tail_]));
                             GraphWeight pcut = genRandom<GraphWeight>(PTOL, 1.0); 
                             tup[1] = edge_n.tail_;
                             if (does_edge_exist(tup))
@@ -202,7 +203,7 @@ class TriangulateEstimate
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(nedges_[owner]));
+                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(degree_[edge_n.tail_]));
 
                             if (genRandom<GraphWeight>(PTOL, d) <= prob)
                                 remote_triangles_[owner] += 1;
@@ -287,7 +288,7 @@ class TriangulateEstimate
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
                             Edge const& edge_n = g_->get_edge(n);
-                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(nedges_[owner]));
+                            GraphWeight prob = (GraphWeight)(tail_freq_remote_[start_idx + edge_n.tail_] / (GraphWeight)(degree_[edge_n.tail_]));
 
                             if (genRandom<GraphWeight>(PTOL, 1.0) <= prob)
                                 remote_triangles_[owner] += 1;
@@ -339,7 +340,7 @@ class TriangulateEstimate
     private:
         Graph* g_;
         GraphElem ntriangles_, lnv_, nv_;
-	GraphElem *tail_freq_, *remote_triangles_, *nedges_;
+	GraphElem *tail_freq_, *remote_triangles_, *degree_;
 
         std::vector<int> targets_;
         std::vector<GraphElem> tail_freq_remote_; 
