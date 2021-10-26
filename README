@@ -62,5 +62,5 @@ Possible options (can be combined):
 7. -o               : Estimate triangle counts - use exact counting for locally owned vertices 
                       and probabilistic estimate (see macros) for remote. 
 
-Please try the default version, this is a growing code and there are versions that are either broken
-or under development.
+Please try the default version (no need to pass any macro in the Makefile), this is a growing 
+codebase and there are versions that are under development.
