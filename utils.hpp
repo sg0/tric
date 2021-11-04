@@ -84,6 +84,12 @@ const MPI_Datatype MPI_WEIGHT_TYPE = MPI_DOUBLE;
 
 extern unsigned seed;
 
+#if defined(AGGR_BUFR)
+#ifndef DEFAULT_BUF_SIZE
+#define DEFAULT_BUF_SIZE   (1048576)
+#endif
+#endif
+
 // Is nprocs a power-of-2?
 int is_pwr2(int nprocs) 
 { return ((nprocs != 0) && !(nprocs & (nprocs - 1))); }
