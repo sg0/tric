@@ -253,7 +253,7 @@ class TriangulateAggrBuffered
         {
             MPI_Status status;
             int flag = -1;
-            GraphElem tup[2] = {-1,-1}, source = -1, prev = 0;
+            GraphElem tup[2] = {-1,-1}, source = -1, prev = 0, outg_counts = 0;
             int count = 0;
                            
             MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, comm_, &flag, &status);
@@ -275,7 +275,10 @@ class TriangulateAggrBuffered
 
                 tup[0] = rbuf_[k];
                 GraphElem seg_count = 0;
-                
+               
+                #pragma omp parallel for schedule(dynamic) \
+                reduction(-:in_nghosts_) reduction(+:outg_counts) \
+                default(shared)
                 for (GraphElem m = k + 1; m < count; m++)
                 {
                     if (rbuf_[m] == -1)
@@ -287,13 +290,14 @@ class TriangulateAggrBuffered
                     tup[1] = rbuf_[m];
                     
                     if (check_edgelist(tup))
-                        rinfo_[source] += 1;
+                        outg_counts += 1;
 
                     in_nghosts_ -= 1;    
                 }
 
                 k += (seg_count - prev);
                 prev = k;
+                rinfo_[source] = outg_counts;
             }
         }
 
