@@ -199,7 +199,7 @@ class TriangulateAggrBuffered
                         {
                             prev_n_ = i;
                             prev_m_ = m;
-
+                                
                             post_messages_reset(owner);
 
                             return;
@@ -211,7 +211,7 @@ class TriangulateAggrBuffered
 
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
-                            if ((sbuf_ctr_[owner] + 2) >= bufsize_)
+                            if ((sbuf_ctr_[owner] + 1) >= bufsize_)
                             {
                                 prev_n_ = i;
                                 prev_m_ = m;
