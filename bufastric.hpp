@@ -253,7 +253,7 @@ class TriangulateAggrBuffered
         {
             MPI_Status status;
             int flag = -1;
-            GraphElem tup[2] = {-1,-1}, source = -1, partial_counts = 0;
+            GraphElem tup[2] = {-1,-1}, source = -1, prev = 0;
             int count = 0;
                            
             MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, comm_, &flag, &status);
@@ -268,26 +268,33 @@ class TriangulateAggrBuffered
             else
                 return;
 
-            #pragma omp parallel for reduction(+:partial_counts) reduction(-:in_nghosts_) if (count > 1000)
-            for (GraphElem k = 0; k < count; k++)
+            for (GraphElem k = 0; k < count;)
             {
                 if (rbuf_[k] == -1)
                     continue;
+
                 tup[0] = rbuf_[k];
+                GraphElem seg_count = 0;
+                
                 for (GraphElem m = k + 1; m < count; m++)
                 {
                     if (rbuf_[m] == -1)
-                        break;
-                    
+                    {
+                      seg_count = m + 1;
+                      break;
+                    }
+
                     tup[1] = rbuf_[m];
                     
                     if (check_edgelist(tup))
-                        partial_counts += 1;
+                        rinfo_[source] += 1;
 
                     in_nghosts_ -= 1;    
                 }
+
+                k += (seg_count - prev);
+                prev = k;
             }
-            rinfo_[source] = partial_counts;
         }
 
         inline GraphElem count()
@@ -309,10 +316,9 @@ class TriangulateAggrBuffered
                 else
                 {
                     int flag = -1;
-                    GraphElem pending_sends = std::accumulate(sbuf_ctr_, sbuf_ctr_ + size_, 0);
                     MPI_Testall(size_-1, sreq_, &flag, MPI_STATUSES_IGNORE);
                     
-                    if ((pending_sends == 0) && (in_nghosts_ == 0) && flag)
+                    if ((in_nghosts_ == 0) && flag)
                     {
                         MPI_Ibarrier(comm_, &nbar_req);
                         nbar_active = true;
