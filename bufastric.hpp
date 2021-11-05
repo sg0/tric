@@ -214,7 +214,7 @@ class TriangulateAggrBuffered
                             if ((sbuf_ctr_[owner] + 1) >= bufsize_)
                             {
                                 prev_n_ = i;
-                                prev_m_ = m;
+                                prev_m_ = n;
                             
                                 sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
                                 sbuf_ctr_[owner] += 1;                               
