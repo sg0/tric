@@ -213,15 +213,12 @@ class TriangulateAggrBuffered
 
                         for (GraphElem n = ((prev_k_ == -1) ? (m + 1) : prev_k_); n < e1; n++)
                         {
-                            if ((sbuf_ctr_[owner] + 1) == bufsize_)
+                            if (sbuf_ctr_[owner] == bufsize_)
                             {
                                 prev_n_ = i;
                                 prev_m_ = m;
                                 prev_k_ = n;
                             
-                                sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
-                                sbuf_ctr_[owner] += 1;                               
-                                
                                 post_messages_reset(owner);
 
                                 return;
