@@ -279,9 +279,6 @@ class TriangulateAggrBuffered
                 tup[0] = rbuf_[k];
                 GraphElem seg_count = 0;
                
-                #pragma omp parallel for schedule(dynamic) \
-                reduction(-:in_nghosts_) reduction(+:outg_counts) \
-                default(shared)
                 for (GraphElem m = k + 1; m < count; m++)
                 {
                     if (rbuf_[m] == -1)
