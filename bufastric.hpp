@@ -48,6 +48,14 @@
 #include <iomanip>
 #include <limits>
 
+#ifndef TAG_DATA
+#define TAG_DATA 100
+#endif
+
+#ifndef TAG_STAT
+#define TAG_STAT 200
+#endif
+
 class TriangulateAggrBuffered
 {
     public:
@@ -55,7 +63,8 @@ class TriangulateAggrBuffered
         TriangulateAggrBuffered(Graph* g, const GraphElem bufsize=DEFAULT_BUF_SIZE): 
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
             sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
-            ntriangles_(0), prev_n_(-1), prev_m_(-1), bufsize_(bufsize)
+            ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), prev_n_(-1), 
+            prev_m_(-1), bufsize_(bufsize)
         {
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
@@ -71,10 +80,15 @@ class TriangulateAggrBuffered
             std::fill(sreq_, sreq_ + (size_-1), MPI_REQUEST_NULL);
             std::memset(rinfo_, 0, sizeof(GraphElem)*size_);
             std::memset(sbuf_ctr_, 0, sizeof(GraphElem)*size_);
+
+            GraphElem *send_count = new GraphElem[size_];
+            GraphElem *recv_count = new GraphElem[size_];
+            std::memset(send_count, 0, sizeof(GraphElem)*size_);
+            std::memset(recv_count, 0, sizeof(GraphElem)*size_);
             
             const GraphElem lnv = g_->get_lnv();
 
-            #pragma omp parallel for reduction(+:ntriangles_)
+            #pragma omp parallel for reduction(+:ntriangles_) default(shared)
             for (GraphElem i = 0; i < lnv; i++)
             {
                 GraphElem e0, e1, tup[2];
@@ -96,10 +110,31 @@ class TriangulateAggrBuffered
                                 ntriangles_ += 1;
                         }
                     }
+                    else
+                    {
+                        for (GraphElem n = m + 1; n < e1; n++)
+                        {
+                          #pragma omp atomic update
+                          send_count[owner] += 1;
+                        }
+                    }
                 }
             }
 
             MPI_Barrier(comm_);
+
+            MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
+
+            for (GraphElem p = 0; p < size_; p++)
+            {
+              out_nghosts_ += send_count[p];
+              in_nghosts_ += recv_count[p];
+            }
+
+            nghosts_ = out_nghosts_ + in_nghosts_;
+
+            free(send_count);
+            free(recv_count);
         }
 
         ~TriangulateAggrBuffered() {}
@@ -125,21 +160,21 @@ class TriangulateAggrBuffered
             {
                 const GraphElem idx = (target > rank_) ? (target-1) : target;
                 MPI_Issend(&sbuf_[idx*bufsize_], sbuf_ctr_[target], 
-                        MPI_GRAPH_TYPE, target, 100, comm_, &sreq_[idx]);
+                        MPI_GRAPH_TYPE, target, TAG_DATA, comm_, &sreq_[idx]);
                 sbuf_ctr_[target] = 0;
             }
         }
          
         inline void post_messages_reset()
         {
-            prev_n_ = -2;
-            prev_m_ = -2;
-
             for (GraphElem p = 0; p < size_; p++)
             {
                 if (p != rank_)
                     post_messages_reset(p);
             }
+            
+            prev_n_ = -2;
+            prev_m_ = -2;
         }
 
         inline void lookup_edges()
@@ -218,7 +253,7 @@ class TriangulateAggrBuffered
         {
             MPI_Status status;
             int flag = -1;
-            GraphElem tup[2] = {-1,-1}, source = -1;
+            GraphElem tup[2] = {-1,-1}, source = -1, partial_counts = 0;
             int count = 0;
                            
             MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, comm_, &flag, &status);
@@ -233,6 +268,7 @@ class TriangulateAggrBuffered
             else
                 return;
 
+            #pragma omp parallel for reduction(+:partial_counts) reduction(-:in_nghosts_) if (count > 1000)
             for (GraphElem k = 0; k < count; k++)
             {
                 if (rbuf_[k] == -1)
@@ -242,14 +278,16 @@ class TriangulateAggrBuffered
                 {
                     if (rbuf_[m] == -1)
                         break;
+                    
                     tup[1] = rbuf_[m];
+                    
                     if (check_edgelist(tup))
-                    {
-                        ntriangles_ += 1;
-                        rinfo_[source] += 1;    
-                    }
+                        partial_counts += 1;
+
+                    in_nghosts_ -= 1;    
                 }
             }
+            rinfo_[source] = partial_counts;
         }
 
         inline GraphElem count()
@@ -274,7 +312,7 @@ class TriangulateAggrBuffered
                     GraphElem pending_sends = std::accumulate(sbuf_ctr_, sbuf_ctr_ + size_, 0);
                     MPI_Testall(size_-1, sreq_, &flag, MPI_STATUSES_IGNORE);
                     
-                    if ((pending_sends == 0) && flag)
+                    if ((pending_sends == 0) && (in_nghosts_ == 0) && flag)
                     {
                         MPI_Ibarrier(comm_, &nbar_req);
                         nbar_active = true;
@@ -297,11 +335,13 @@ class TriangulateAggrBuffered
 
     private:
         Graph* g_;
+        
         GraphElem ntriangles_;
-        GraphElem prev_n_, prev_m_, bufsize_;
-	GraphElem *sbuf_, *rbuf_, *sbuf_ctr_, *rinfo_, *srinfo_;
+        GraphElem prev_n_, prev_m_, bufsize_, nghosts_, out_nghosts_, in_nghosts_;
+        GraphElem *sbuf_, *rbuf_, *sbuf_ctr_, *rinfo_, *srinfo_;
         MPI_Request *sreq_;
-	int rank_, size_;
+	
+        int rank_, size_;
         MPI_Comm comm_;
 };
 #endif
