@@ -159,8 +159,10 @@ class TriangulateAggrBuffered
             if (sbuf_ctr_[target] > 0)
             {
                 const GraphElem idx = (target > rank_) ? (target-1) : target;
+                
                 MPI_Issend(&sbuf_[idx*bufsize_], sbuf_ctr_[target], 
                         MPI_GRAPH_TYPE, target, TAG_DATA, comm_, &sreq_[idx]);
+                
                 sbuf_ctr_[target] = 0;
             }
         }
@@ -308,6 +310,11 @@ class TriangulateAggrBuffered
 
             while(!done)
             {
+                // last chunk
+                GraphElem *nchunk = std::max_element(sbuf_ctr_, sbuf_ctr_ + size_);
+                if (*nchunk < bufsize_) 
+                    post_messages_reset();
+                
                 lookup_edges();
                 process_messages();
 
@@ -328,11 +335,6 @@ class TriangulateAggrBuffered
                         nbar_active = true;
                     }
                 }
-                
-                // last chunk
-                GraphElem *nchunk = std::max_element(sbuf_ctr_, sbuf_ctr_ + size_);
-                if (*nchunk < bufsize_) 
-                    post_messages_reset();
             }
 
             MPI_Alltoall(rinfo_, 1, MPI_GRAPH_TYPE, srinfo_, 1, MPI_GRAPH_TYPE, comm_);
