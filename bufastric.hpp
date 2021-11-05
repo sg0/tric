@@ -198,17 +198,6 @@ class TriangulateAggrBuffered
                     const int owner = g_->get_owner(edge_m.tail_);
                     if (owner != rank_)
                     {
-                        if (sbuf_ctr_[owner] == bufsize_)
-                        {
-                            prev_n_ = i;
-                            prev_m_ = m;
-                            prev_k_ = -1;
-                                
-                            post_messages_reset(owner);
-
-                            return;
-                        }
-
                         const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
                         sbuf_[disp+sbuf_ctr_[owner]] = edge_m.tail_;
                         sbuf_ctr_[owner] += 1;
@@ -220,7 +209,9 @@ class TriangulateAggrBuffered
                                 prev_n_ = i;
                                 prev_m_ = m;
                                 prev_k_ = n;
-                            
+                         
+                                sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+                                
                                 post_messages_reset(owner);
 
                                 return;
@@ -309,13 +300,14 @@ class TriangulateAggrBuffered
             MPI_Request nbar_req;
 
             while(!done)
-            {
-                // last chunk
-                GraphElem *nchunk = std::max_element(sbuf_ctr_, sbuf_ctr_ + size_);
-                if (*nchunk < bufsize_) 
-                    post_messages_reset();
+            {    
+                GraphElem nchunk = *std::max_element(sbuf_ctr_, sbuf_ctr_ + size_);
                 
-                lookup_edges();
+                if ((nchunk > 0) && (nchunk < bufsize_)) // last chunk
+                  post_messages_reset();
+                else
+                  lookup_edges();
+
                 process_messages();
 
                 if (nbar_active)
