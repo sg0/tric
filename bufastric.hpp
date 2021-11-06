@@ -162,8 +162,6 @@ class TriangulateAggrBuffered
                 
                 MPI_Issend(&sbuf_[idx*bufsize_], sbuf_ctr_[target], 
                         MPI_GRAPH_TYPE, target, TAG_DATA, comm_, &sreq_[idx]);
-                
-                sbuf_ctr_[target] = 0;
             }
         }
          
@@ -191,40 +189,45 @@ class TriangulateAggrBuffered
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
                 if ((e0 + 1) == e1)
-                    continue;
+                  continue;
                 for (GraphElem m = ((prev_m_ == -1) ? e0 : prev_m_); m < e1-1; m++)
                 {
-                    Edge const& edge_m = g_->get_edge(m);
-                    const int owner = g_->get_owner(edge_m.tail_);
-                    if (owner != rank_)
+                  Edge const& edge_m = g_->get_edge(m);
+                  const int owner = g_->get_owner(edge_m.tail_);
+                  if (owner != rank_)
+                  {
+                    const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
+
+                    if (sbuf_ctr_[owner] == 0)
                     {
-                        const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
-                        sbuf_[disp+sbuf_ctr_[owner]] = edge_m.tail_;
-                        sbuf_ctr_[owner] += 1;
+                      sbuf_[disp+sbuf_ctr_[owner]] = edge_m.tail_;
+                      sbuf_ctr_[owner] += 1;
 
-                        for (GraphElem n = ((prev_k_ == -1) ? (m + 1) : prev_k_); n < e1; n++)
+                      for (GraphElem n = ((prev_k_ == -1) ? (m + 1) : prev_k_); n < e1; n++)
+                      {
+                        if (sbuf_ctr_[owner] == (bufsize_-1))
                         {
-                            if (sbuf_ctr_[owner] == bufsize_)
-                            {
-                                prev_n_ = i;
-                                prev_m_ = m;
-                                prev_k_ = n;
-                         
-                                sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
-                                
-                                post_messages_reset(owner);
+                          prev_n_ = i;
+                          prev_m_ = m;
+                          prev_k_ = n;
 
-                                return;
-                            }
+                          sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+                          sbuf_ctr_[owner] += 1;
 
-                            Edge const& edge_n = g_->get_edge(n);
-                            sbuf_[disp+sbuf_ctr_[owner]] = edge_n.tail_;
-                            sbuf_ctr_[owner] += 1;
+                          post_messages_reset(owner);
+
+                          return;
                         }
-                        
-                        sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+
+                        Edge const& edge_n = g_->get_edge(n);
+                        sbuf_[disp+sbuf_ctr_[owner]] = edge_n.tail_;
                         sbuf_ctr_[owner] += 1;
+                      }
+
+                      sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+                      sbuf_ctr_[owner] += 1;
                     }
+                  }
                 }
             }
         }
@@ -299,7 +302,7 @@ class TriangulateAggrBuffered
             bool done = false, nbar_active = false;
             MPI_Request nbar_req;
 
-            while(!done)
+            while(!done && in_nghosts_)
             {    
                 GraphElem nchunk = *std::max_element(sbuf_ctr_, sbuf_ctr_ + size_);
                 
@@ -312,19 +315,22 @@ class TriangulateAggrBuffered
 
                 if (nbar_active)
                 {
-                    int flag = -1;
-                    MPI_Test(&nbar_req, &flag, MPI_STATUS_IGNORE);
-                    done = flag ? true : false;
+                  int flag = -1;
+                  MPI_Test(&nbar_req, &flag, MPI_STATUS_IGNORE);
+                  done = flag ? true : false;
                 }
                 else
                 {
                     int flag = -1;
                     MPI_Testall(size_-1, sreq_, &flag, MPI_STATUSES_IGNORE);
                     
-                    if ((in_nghosts_ == 0) && flag)
+                    if (flag)
                     {
                         MPI_Ibarrier(comm_, &nbar_req);
                         nbar_active = true;
+                        
+                        for (GraphElem p = 0; p < size_; p++)
+                            sbuf_ctr_[p] = 0;
                     }
                 }
             }
