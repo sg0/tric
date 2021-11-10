@@ -62,7 +62,7 @@ class TriangulateAggrBuffered
 
         TriangulateAggrBuffered(Graph* g, const GraphElem bufsize=DEFAULT_BUF_SIZE): 
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
-            sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
+            sreq_(nullptr), stat_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
             ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), prev_n_(-1), 
             prev_m_(-1), prev_k_(-1), bufsize_(bufsize)
         {
@@ -74,6 +74,7 @@ class TriangulateAggrBuffered
             rinfo_    = new GraphElem[size_];
             srinfo_   = new GraphElem[size_];
             sreq_     = new MPI_Request[size_-1];
+            stat_     = new MPI_Status[size_-1];
             sbuf_     = new GraphElem[(size_-1)*bufsize_];
             rbuf_     = new GraphElem[bufsize_];
 
@@ -147,6 +148,7 @@ class TriangulateAggrBuffered
             delete []srinfo_;
             delete []rinfo_;
             delete []sreq_;
+            delete []stat_;
         }
 
         // TODO
@@ -252,7 +254,7 @@ class TriangulateAggrBuffered
         {
             MPI_Status status;
             int flag = -1;
-            GraphElem tup[2] = {-1,-1}, source = -1, prev = 0, outg_counts = 0;
+            GraphElem tup[2] = {-1,-1}, source = -1, prev = 0;
             int count = 0;
                            
             MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, comm_, &flag, &status);
@@ -286,14 +288,13 @@ class TriangulateAggrBuffered
                     tup[1] = rbuf_[m];
                     
                     if (check_edgelist(tup))
-                        outg_counts += 1;
+                        rinfo_[source] += 1;
 
                     in_nghosts_ -= 1;    
                 }
 
                 k += (seg_count - prev);
                 prev = k;
-                rinfo_[source] = outg_counts;
             }
         }
 
@@ -322,7 +323,7 @@ class TriangulateAggrBuffered
                 else
                 {
                     int flag = -1;
-                    MPI_Testall(size_-1, sreq_, &flag, MPI_STATUSES_IGNORE);
+                    MPI_Testall(size_-1, sreq_, &flag, stat_);
                     
                     if (flag)
                     {
@@ -330,7 +331,16 @@ class TriangulateAggrBuffered
                         nbar_active = true;
                         
                         for (GraphElem p = 0; p < size_; p++)
-                            sbuf_ctr_[p] = 0;
+                        {
+                            if (p != rank_)
+                            {
+                                int flag = 0;
+                                const GraphElem idx = (p > rank_) ? (p-1) : p;
+                                MPI_Request_get_status(sreq_[idx], &flag, &stat_[idx]);
+                                if (flag)
+                                    sbuf_ctr_[p] = 0;
+                            }
+                        }
                     }
                 }
             }
@@ -353,6 +363,7 @@ class TriangulateAggrBuffered
         GraphElem prev_n_, prev_m_, prev_k_, bufsize_, nghosts_, out_nghosts_, in_nghosts_;
         GraphElem *sbuf_, *rbuf_, *sbuf_ctr_, *rinfo_, *srinfo_;
         MPI_Request *sreq_;
+        MPI_Status *stat_;
 	
         int rank_, size_;
         MPI_Comm comm_;
