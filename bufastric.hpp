@@ -177,16 +177,15 @@ class TriangulateAggrBuffered
 
         inline void lookup_edges()
         {
-            if (out_nghosts_ == 0)
-                return;
-
             const GraphElem lnv = g_->get_lnv();
             for (GraphElem i = ((prev_n_ == -1) ? 0 : prev_n_); i < lnv; i++)
             {
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
+                
                 if ((e0 + 1) == e1)
                   continue;
+                
                 for (GraphElem m = ((prev_m_ == -1) ? e0 : prev_m_); m < e1-1; m++)
                 {
                   Edge const& edge_m = g_->get_edge(m);
@@ -221,8 +220,11 @@ class TriangulateAggrBuffered
                       out_nghosts_ -= 1;
                     }
 
-                    sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
-                    sbuf_ctr_[owner] += 1;
+                    if (stat_[owner] == '0')
+                    {
+                      sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+                      sbuf_ctr_[owner] += 1;
+                    }
                   }
                 }
             }
@@ -312,11 +314,11 @@ class TriangulateAggrBuffered
                 
                 if (over != MPI_UNDEFINED)
                 {
-                    for (int i = 0; i < over; i++)
-                    {
-                        sbuf_ctr_[inds[i]] = 0;
-                        stat_[inds[i]] = '0';
-                    }
+                  for (int i = 0; i < over; i++)
+                  {
+                    sbuf_ctr_[inds[i]] = 0;
+                    stat_[inds[i]] = '0';
+                  }
                 }
                 
                 if (nbar_active)
