@@ -62,7 +62,7 @@ class TriangulateAggrBuffered
 
         TriangulateAggrBuffered(Graph* g, const GraphElem bufsize=DEFAULT_BUF_SIZE): 
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
-            sreq_(nullptr), stat_(nullptr), sent_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
+            sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
             ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), prev_n_(-1), 
             prev_m_(-1), prev_k_(-1), bufsize_(bufsize)
         {
@@ -74,16 +74,11 @@ class TriangulateAggrBuffered
             rinfo_    = new GraphElem[size_];
             srinfo_   = new GraphElem[size_];
             sreq_     = new MPI_Request[size_];
-            stat_     = new int[size_];
-            sent_     = new char[size_];
             sbuf_     = new GraphElem[(size_-1)*bufsize_];
             rbuf_     = new GraphElem[bufsize_];
 
             std::fill(sreq_, sreq_ + size_, MPI_REQUEST_NULL);
-            std::fill(stat_, stat_ + size_, 0);
-            std::fill(sent_, sent_ + size_, '0');
             std::memset(rinfo_, 0, sizeof(GraphElem)*size_);
-            std::memset(sbuf_ctr_, 0, sizeof(GraphElem)*size_);
 
             GraphElem *send_count = new GraphElem[size_];
             GraphElem *recv_count = new GraphElem[size_];
@@ -151,8 +146,6 @@ class TriangulateAggrBuffered
             delete []srinfo_;
             delete []rinfo_;
             delete []sreq_;
-            delete []stat_;
-            delete []sent_;
         }
 
         // TODO
@@ -164,31 +157,28 @@ class TriangulateAggrBuffered
         {
           for (GraphElem p = 0; p < size_; p++)
           {
-            if ((p != rank_) && (sbuf_ctr_[p] > 0))
+            if (sbuf_ctr_[p] > 0)
             {
                 const GraphElem idx = (p > rank_) ? (p-1) : p;
                 
+                sbuf_[idx*bufsize_+sbuf_ctr_[p]] = -1; // demarcate vertex boundary
+                sbuf_ctr_[p] += 1;
+                
                 MPI_Isend(&sbuf_[idx*bufsize_], sbuf_ctr_[p], 
                         MPI_GRAPH_TYPE, p, TAG_DATA, comm_, &sreq_[p]);
-
-                sent_[p] = '1';
             }
           }
         }
-         
-        inline void post_messages_reset()
-        {
-            post_messages();
 
-            prev_n_ = -2;
-            prev_m_ = -2;
-            prev_k_ = -2;
-        }
-
-        inline void lookup_edges()
+        inline void lookup_edges(int flag)
         {
             if ((prev_n_ == -2) && (prev_m_ == -2) && (prev_k_ == -2))
                 return;
+
+            if (!flag)
+                return;
+            else
+                std::fill(sbuf_ctr_, sbuf_ctr_ + size_, 0);
 
             const GraphElem lnv = g_->get_lnv();
             for (GraphElem i = ((prev_n_ == -1) ? 0 : prev_n_); i < lnv; i++)
@@ -202,7 +192,7 @@ class TriangulateAggrBuffered
                   Edge const& edge_m = g_->get_edge(m);
                   const int owner = g_->get_owner(edge_m.tail_);
 
-                  if ((owner != rank_) && (sent_[owner] == '0'))
+                  if (owner != rank_)
                   {
                     const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
                     sbuf_[disp+sbuf_ctr_[owner]] = edge_m.tail_;
@@ -215,9 +205,6 @@ class TriangulateAggrBuffered
                         prev_n_ = i;
                         prev_m_ = m;
                         prev_k_ = n;
-
-                        sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
-                        sbuf_ctr_[owner] += 1;
 
                         post_messages();
 
@@ -303,46 +290,34 @@ class TriangulateAggrBuffered
 
         inline GraphElem count()
         {
-            bool done = false, nbar_active = false, all_sends_done = false;
-            MPI_Request nbar_req = MPI_REQUEST_NULL;
-            int over = 0;
+            int flag = 1;
+            bool sends_done = false, done = false, nbar_active = false;
+            MPI_Request nbar_req;
 
-            while(!done && in_nghosts_)
+            while(!done)
             {    
-                if (out_nghosts_ == 0)   
-                { 
-                    post_messages_reset();
-                    all_sends_done = true;
-                }
-                else
-                    lookup_edges();
+                lookup_edges(flag);
                                
                 process_messages();
 
-                MPI_Testsome(size_, sreq_, &over, stat_, MPI_STATUSES_IGNORE);
+                MPI_Testall(size_, sreq_, &flag, MPI_STATUSES_IGNORE);
                 
-                if (over != MPI_UNDEFINED)
-                {
-                  for (GraphElem p = 0; p < over; p++)
-                  {
-                    sbuf_ctr_[stat_[p]] = 0;
-                    sent_[stat_[p]] = '0';
-                  }
-                }
-
                 if (nbar_active)
                 {
-                  int flag = -1;
-                  MPI_Test(&nbar_req, &flag, MPI_STATUS_IGNORE);
-                  done = flag ? true : false;
+                    int flag = -1;
+                    MPI_Test(&nbar_req, &flag, MPI_STATUS_IGNORE);
+                    done = flag ? true : false;
                 }
                 else
                 {
-                  if (all_sends_done)
-                  {
-                    MPI_Ibarrier(comm_, &nbar_req);
-                    nbar_active = true;
-                  }
+                    if ((in_nghosts_ + out_nghosts_) == 0)
+                    {
+                        MPI_Ibarrier(comm_, &nbar_req);
+                        nbar_active = true;
+                        prev_n_ = -2;
+                        prev_m_ = -2;
+                        prev_k_ = -2;
+                    }
                 }
             }
 
@@ -363,8 +338,6 @@ class TriangulateAggrBuffered
         GraphElem ntriangles_;
         GraphElem prev_n_, prev_m_, prev_k_, bufsize_, nghosts_, out_nghosts_, in_nghosts_;
         GraphElem *sbuf_, *rbuf_, *sbuf_ctr_, *rinfo_, *srinfo_;
-        int *stat_;
-        char *sent_;
         MPI_Request *sreq_;
 
         int rank_, size_;
