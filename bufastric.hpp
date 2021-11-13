@@ -171,6 +171,7 @@ class TriangulateAggrBuffered
             }
         }
         
+        // create a stat to denote end
         void nbsend()
         {
           for (GraphElem p = 0; p < size_; p++)
@@ -304,7 +305,7 @@ class TriangulateAggrBuffered
 
         inline GraphElem count()
         {
-            bool done = false, nbar_active = false;
+            bool done = false, nbar_active = false, sends_done = false;
             MPI_Request nbar_req = MPI_REQUEST_NULL;
 
             int *inds = new int[size_];
@@ -313,7 +314,13 @@ class TriangulateAggrBuffered
             while(!done)
             {  
               if (out_nghosts_ == 0)
-                nbsend();
+              {
+                  if (!sends_done)
+                  {
+                      nbsend();
+                      sends_done = true;
+                  }
+              }
               else
                 lookup_edges();
 
