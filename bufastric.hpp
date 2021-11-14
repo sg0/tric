@@ -203,6 +203,20 @@ class TriangulateAggrBuffered
                   continue;
 
                 const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
+                
+                if (sbuf_ctr_[owner] == (bufsize_-1))
+                {
+                    prev_n_ = i;
+                    prev_m_ = m;
+                    prev_k_[owner] = -1;
+
+                    stat_[owner] = '1'; // messages in-flight
+
+                    nbsend(owner);
+
+                    continue;
+                }
+
                 sbuf_[disp+sbuf_ctr_[owner]] = edge_m.tail_;
                 sbuf_ctr_[owner] += 1;
 
