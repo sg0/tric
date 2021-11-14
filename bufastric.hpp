@@ -204,7 +204,7 @@ class TriangulateAggrBuffered
 
                 const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
                 
-                if (sbuf_ctr_[owner] == (bufsize_-1))
+                if (sbuf_ctr_[owner] == bufsize_)
                 {
                     prev_n_ = i;
                     prev_m_ = m;
