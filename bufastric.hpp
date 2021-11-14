@@ -84,6 +84,7 @@ class TriangulateAggrBuffered
             std::fill(stat_, stat_ + size_, '0');
             std::memset(rinfo_, 0, sizeof(GraphElem)*size_);
 
+            std::fill(sbuf_ctr_, sbuf_ctr_ + size_, 0);
             GraphElem *send_count = new GraphElem[size_];
             GraphElem *recv_count = new GraphElem[size_];
             std::memset(send_count, 0, sizeof(GraphElem)*size_);
@@ -180,7 +181,7 @@ class TriangulateAggrBuffered
               nbsend(p);
           }
         }
-
+        
         inline void lookup_edges()
         {
           const GraphElem lnv = g_->get_lnv();
@@ -203,20 +204,6 @@ class TriangulateAggrBuffered
                   continue;
 
                 const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
-                
-                if (sbuf_ctr_[owner] == bufsize_)
-                {
-                    prev_n_ = i;
-                    prev_m_ = m;
-                    prev_k_[owner] = -1;
-
-                    stat_[owner] = '1'; // messages in-flight
-
-                    nbsend(owner);
-
-                    continue;
-                }
-
                 sbuf_[disp+sbuf_ctr_[owner]] = edge_m.tail_;
                 sbuf_ctr_[owner] += 1;
 
