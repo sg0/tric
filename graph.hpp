@@ -65,6 +65,16 @@ struct Edge
     Edge(): tail_(-1), weight_(0.0) {}
 };
 
+#if defined(AGGR_BUFR) // aggregate buffered
+struct EdgeStat
+{
+    Edge const *edge_;
+    bool active_;
+    
+    EdgeStat(Edge const* edge): edge_(edge), active_(true) {}
+};
+#endif
+
 struct EdgeTuple
 {
     GraphElem ij_[2];
@@ -115,9 +125,12 @@ class Graph
 
         ~Graph() 
         {
-            edge_list_.clear();
-            edge_indices_.clear();
-            parts_.clear();
+#if defined(AGGR_BUFR) 
+          edge_stat_.clear();
+#endif
+          edge_list_.clear();
+          edge_indices_.clear();
+          parts_.clear();
         }
          
         // update vertex partition information
@@ -186,7 +199,12 @@ class Graph
          
         Edge& set_edge(GraphElem const index)
         { return edge_list_[index]; }       
-        
+                
+#if defined(AGGR_BUFR) 
+        EdgeStat& get_edge_stat(GraphElem const index)
+        { return edge_stat_[index]; }
+#endif
+
         // local <--> global index translation
         // -----------------------------------
         GraphElem local_to_global(GraphElem idx)
@@ -285,6 +303,9 @@ class Graph
         }
         
         // public variables
+#if defined(AGGR_BUFR) 
+        std::vector<EdgeStat> edge_stat_;
+#endif
         std::vector<GraphElem> edge_indices_;
         std::vector<Edge> edge_list_;
     private:
@@ -406,6 +427,11 @@ class BinaryEdgeList
             for(GraphElem i=1;  i < M_local_+1; i++)
                 g->edge_indices_[i] -= g->edge_indices_[0];   
             g->edge_indices_[0] = 0;
+            
+#if defined(AGGR_BUFR) 
+            for (GraphElem i=0; i < g->edge_list_.size(); i++)
+                g->edge_stat_.emplace_back((Edge const*)&g->edge_list_[i]);
+#endif
 
             return g;
         }
@@ -565,6 +591,10 @@ class BinaryEdgeList
                 g->edge_indices_[i] -= g->edge_indices_[0];   
             g->edge_indices_[0] = 0;
 
+#if defined(AGGR_BUFR) 
+            for (GraphElem i=0; i < g->edge_list_.size(); i++)
+                g->edge_stat_.emplace_back((Edge const*)&g->edge_list_[i]);
+#endif
             mbins.clear();
 
             return g;
