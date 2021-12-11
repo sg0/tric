@@ -64,7 +64,7 @@ class TriangulateAggrBuffered
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
             sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
             ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), 
-            prev_i_(-1), prev_k_(nullptr), stat_(nullptr), bufsize_(bufsize)
+            prev_i_(-1), stat_(nullptr), bufsize_(bufsize)
         {
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
@@ -73,14 +73,12 @@ class TriangulateAggrBuffered
             sbuf_ctr_ = new GraphElem[size_];
             rinfo_    = new GraphElem[size_];
             srinfo_   = new GraphElem[size_];
-            prev_k_   = new GraphElem[size_];
             stat_     = new char[size_];
             sreq_     = new MPI_Request[size_];
             sbuf_     = new GraphElem[(size_-1)*bufsize_];
             rbuf_     = new GraphElem[bufsize_];
 
             std::fill(sreq_, sreq_ + size_, MPI_REQUEST_NULL);
-            std::fill(prev_k_, prev_k_ + size_, -1);
             std::fill(stat_, stat_ + size_, '0');
             std::memset(rinfo_, 0, sizeof(GraphElem)*size_);
 
@@ -153,7 +151,6 @@ class TriangulateAggrBuffered
             delete []srinfo_;
             delete []rinfo_;
             delete []sreq_;
-            delete []prev_k_;
             delete []stat_;
         }
 
@@ -185,6 +182,7 @@ class TriangulateAggrBuffered
         inline void lookup_edges()
         {
           const GraphElem lnv = g_->get_lnv();
+          
           for (GraphElem i = ((prev_i_ == -1) ? 0 : prev_i_); i < lnv; i++)
           {
             GraphElem e0, e1;
@@ -200,20 +198,18 @@ class TriangulateAggrBuffered
 
               if (owner != rank_ && edge.active_)
               {               
-                if (stat_[owner] == '1') 
+                if (stat_[owner] == '1') // send buffer unsafe for use 
                   continue;
  
                 const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
                 sbuf_[disp+sbuf_ctr_[owner]] = edge.edge_->tail_;
                 sbuf_ctr_[owner] += 1;
 
-                for (GraphElem n = ((prev_k_[owner] == -1) ? (m + 1) : prev_k_[owner]); n < e1; n++)
+                for (GraphElem n = m + 1; n < e1; n++)
                 {
                   if (sbuf_ctr_[owner] == (bufsize_-1))
                   {
                     prev_i_ = i;
-                    prev_k_[owner] = n;
-
                     sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
                     sbuf_ctr_[owner] += 1;
                     stat_[owner] = '1'; // messages in-flight
@@ -231,24 +227,22 @@ class TriangulateAggrBuffered
 
                 if (stat_[owner] == '0')
                 {
+                  edge.active_ = false;
+                  
                   if (sbuf_ctr_[owner] == (bufsize_-1))
                   {
                     prev_i_ = i;
-                    prev_k_[owner] = -1;
-
-                    sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+                    sbuf_[disp+sbuf_ctr_[owner]] = -1; 
                     sbuf_ctr_[owner] += 1;
-                    stat_[owner] = '1'; // messages in-flight
+                    stat_[owner] = '1';
 
                     nbsend(owner);
                   }
                   else
                   {
-                    sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+                    sbuf_[disp+sbuf_ctr_[owner]] = -1; 
                     sbuf_ctr_[owner] += 1;
                   }
-
-                  edge.active_ = false;
                 }
               }
             }
@@ -325,7 +319,7 @@ class TriangulateAggrBuffered
             MPI_Request nbar_req = MPI_REQUEST_NULL;
 
             int *inds = new int[size_];
-            int over = -1;
+            int over = MPI_UNDEFINED;
 
             while(!done)
             {  
@@ -367,6 +361,7 @@ class TriangulateAggrBuffered
                   nbar_active = true;
                 }
               }
+              //std::cout << in_nghosts_ << ", " << out_nghosts_ << std::endl;
             }
 
             MPI_Alltoall(rinfo_, 1, MPI_GRAPH_TYPE, srinfo_, 1, MPI_GRAPH_TYPE, comm_);
@@ -387,7 +382,7 @@ class TriangulateAggrBuffered
         
         GraphElem ntriangles_;
         GraphElem bufsize_, nghosts_, out_nghosts_, in_nghosts_, prev_i_;
-        GraphElem *sbuf_, *rbuf_, *prev_k_, *sbuf_ctr_, *rinfo_, *srinfo_;
+        GraphElem *sbuf_, *rbuf_, *sbuf_ctr_, *rinfo_, *srinfo_;
         MPI_Request *sreq_;
         char *stat_;
 
