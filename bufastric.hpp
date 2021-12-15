@@ -233,21 +233,22 @@ class TriangulateAggrBuffered
                     edge.active_ = false;
                   }
                 }
-                
-                if (sbuf_ctr_[owner] == (bufsize_-1))
-                {
-                  prev_k_[owner] = -1;
-                  
-                  sbuf_[disp+sbuf_ctr_[owner]] = -1; 
-                  sbuf_ctr_[owner] += 1;
-                  stat_[owner] = '1';
 
-                  nbsend(owner);
-                }
-                else
-                {
-                  sbuf_[disp+sbuf_ctr_[owner]] = -1; 
-                  sbuf_ctr_[owner] += 1;
+                if (stat_[owner] == '0') 
+                { 
+                  if (sbuf_ctr_[owner] == (bufsize_-1))
+                  {
+                    sbuf_[disp+sbuf_ctr_[owner]] = -1; 
+                    sbuf_ctr_[owner] += 1;
+                    stat_[owner] = '1';
+
+                    nbsend(owner);
+                  }
+                  else
+                  {
+                    sbuf_[disp+sbuf_ctr_[owner]] = -1; 
+                    sbuf_ctr_[owner] += 1;
+                  }
                 }
               }
             }
@@ -289,32 +290,33 @@ class TriangulateAggrBuffered
             else
                 return;
 
+
             for (GraphElem k = 0; k < count;)
             {
-                if (rbuf_[k] == -1)
-                    continue;
+              if (rbuf_[k] == -1)
+                continue;
 
-                tup[0] = rbuf_[k];
-                GraphElem seg_count = 0;
-               
-                for (GraphElem m = k + 1; m < count; m++)
+              tup[0] = rbuf_[k];
+              GraphElem curr_count = 0;
+
+              for (GraphElem m = k + 1; m < count; m++)
+              {
+                if (rbuf_[m] == -1)
                 {
-                    if (rbuf_[m] == -1)
-                    {
-                      seg_count = m + 1;
-                      break;
-                    }
-
-                    tup[1] = rbuf_[m];
-                    
-                    if (check_edgelist(tup))
-                        rinfo_[source] += 1;
-
-                    in_nghosts_ -= 1;    
+                  curr_count = m + 1;
+                  break;
                 }
 
-                k += (seg_count - prev);
-                prev = k;
+                tup[1] = rbuf_[m];
+
+                if (check_edgelist(tup))
+                  rinfo_[source] += 1; // EDGE_VALID_TAG 
+
+                in_nghosts_ -= 1;
+              }
+
+              k += (curr_count - prev);
+              prev = k;
             }
         }
 
