@@ -60,7 +60,7 @@ class TriangulateAggrBuffered
 {
     public:
 
-        TriangulateAggrBuffered(Graph* g, const GraphElem bufsize=DEFAULT_BUF_SIZE): 
+        TriangulateAggrBuffered(Graph* g, const GraphElem bufsize): 
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
             sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
             ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0),  
@@ -69,6 +69,9 @@ class TriangulateAggrBuffered
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
             MPI_Comm_rank(comm_, &rank_);
+
+            if (!bufsize_)
+                bufsize_ = 32768;
             
             sbuf_ctr_ = new GraphElem[size_];
             rinfo_    = new GraphElem[size_];

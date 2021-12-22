@@ -82,6 +82,7 @@ static bool readBalanced = false;
 static GraphWeight randomEdgePercent = 0.0;
 static bool randomNumberLCG = false;
 static bool estimateTriangles = false;
+static long bufferSize = 0;
 
 // parse command line parameters
 static void parseCommandLine(const int argc, char * const argv[]);
@@ -168,8 +169,8 @@ int main(int argc, char *argv[])
     TriangulateAggrFatBatch tr(g);
 #elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
     TriangulateEstimate tr(g);
-#elif defined(AGGR_BUFR)
-    TriangulateAggrBuffered tr(g);
+#elif defined(AGGR_BUFR) 
+    TriangulateAggrBuffered tr(g, ((bufferSize == 0) ? DEFAULT_BUF_SIZE : bufferSize));
 #else
     TriangulateAggrFatCompressed tr(g);
 #endif
@@ -196,7 +197,7 @@ int main(int argc, char *argv[])
 #endif
     else
 #if defined(AGGR_BUFR)
-        std::cout << "Per-PE buffer count: " << DEFAULT_BUF_SIZE << std::endl;
+        std::cout << "Per-PE buffer count: " << bufferSize << std::endl;
 #endif
         std::cout << "Number of triangles: " << ntris << std::endl;
 
@@ -216,7 +217,7 @@ void parseCommandLine(const int argc, char * const argv[])
 {
   int ret;
 
-  while ((ret = getopt(argc, argv, "f:r:n:p:olb")) != -1) {
+  while ((ret = getopt(argc, argv, "f:r:n:p:olbs:")) != -1) {
     switch (ret) {
     case 'f':
       inputFileName.assign(optarg);
@@ -240,6 +241,9 @@ void parseCommandLine(const int argc, char * const argv[])
       break;
     case 'o':
       estimateTriangles = true;
+      break;
+    case 's':
+      bufferSize = atol(optarg);
       break;
     default:
       assert(0 && "Should not reach here!!");
