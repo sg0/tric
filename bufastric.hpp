@@ -63,8 +63,8 @@ class TriangulateAggrBuffered
         TriangulateAggrBuffered(Graph* g, const GraphElem bufsize=DEFAULT_BUF_SIZE): 
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
             sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
-            ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), 
-            prev_k_(nullptr), stat_(nullptr), bufsize_(bufsize)
+            ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0),  
+            prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), bufsize_(bufsize)
         {
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
@@ -74,6 +74,7 @@ class TriangulateAggrBuffered
             rinfo_    = new GraphElem[size_];
             srinfo_   = new GraphElem[size_];
             prev_k_   = new GraphElem[size_];
+            prev_m_   = new GraphElem[size_];
             stat_     = new char[size_];
             sreq_     = new MPI_Request[size_];
             sbuf_     = new GraphElem[(size_-1)*bufsize_];
@@ -81,6 +82,7 @@ class TriangulateAggrBuffered
 
             std::fill(sreq_, sreq_ + size_, MPI_REQUEST_NULL);
             std::fill(prev_k_, prev_k_ + size_, -1);
+            std::fill(prev_m_, prev_m_ + size_, -1);
             std::fill(stat_, stat_ + size_, '0');
             std::memset(rinfo_, 0, sizeof(GraphElem)*size_);
 
@@ -154,6 +156,7 @@ class TriangulateAggrBuffered
             delete []rinfo_;
             delete []sreq_;
             delete []prev_k_;
+            delete []prev_m_;
             delete []stat_;
         }
 
@@ -202,52 +205,67 @@ class TriangulateAggrBuffered
               {               
                 if (stat_[owner] == '1') 
                   continue;
- 
-                const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
-                sbuf_[disp+sbuf_ctr_[owner]] = edge.edge_->tail_;
-                sbuf_ctr_[owner] += 1;
 
-                for (GraphElem n = ((prev_k_[owner] == -1) ? (m + 1) : prev_k_[owner]); n < e1; n++)
+                if (m >= prev_m_[owner])
                 {
+                  const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
+                  
                   if (sbuf_ctr_[owner] == (bufsize_-1))
                   {
-                    prev_k_[owner] = n;
-
-                    sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
-                    sbuf_ctr_[owner] += 1;
+                    prev_m_[owner] = m;
+                    prev_k_[owner] = -1;
                     stat_[owner] = '1'; // messages in-flight
 
                     nbsend(owner);
 
-                    break;
+                    continue;
                   }
 
-                  Edge const& edge_n = g_->get_edge(n);
-                  sbuf_[disp+sbuf_ctr_[owner]] = edge_n.tail_;
+                  sbuf_[disp+sbuf_ctr_[owner]] = edge.edge_->tail_;
                   sbuf_ctr_[owner] += 1;
-                  out_nghosts_ -= 1;
 
-                  if (n == (e1-1))
+                  for (GraphElem n = ((prev_k_[owner] == -1) ? (m + 1) : prev_k_[owner]); n < e1; n++)
                   {
+                    if (sbuf_ctr_[owner] == (bufsize_-1))
+                    {
+                      prev_m_[owner] = m;
+                      prev_k_[owner] = n;
+
+                      sbuf_[disp+sbuf_ctr_[owner]] = -1; // demarcate vertex boundary
+                      sbuf_ctr_[owner] += 1;
+                      stat_[owner] = '1'; 
+
+                      nbsend(owner);
+
+                      break;
+                    }
+
+                    Edge const& edge_n = g_->get_edge(n);
+                    sbuf_[disp+sbuf_ctr_[owner]] = edge_n.tail_;
+                    sbuf_ctr_[owner] += 1;
+                    out_nghosts_ -= 1;
+                  }
+
+                  if (stat_[owner] == '0') 
+                  {
+                    prev_m_[owner] = m;
                     prev_k_[owner] = -1;
+
                     edge.active_ = false;
-                  }
-                }
 
-                if (stat_[owner] == '0') 
-                { 
-                  if (sbuf_ctr_[owner] == (bufsize_-1))
-                  {
-                    sbuf_[disp+sbuf_ctr_[owner]] = -1; 
-                    sbuf_ctr_[owner] += 1;
-                    stat_[owner] = '1';
+                    if (sbuf_ctr_[owner] == (bufsize_-1))
+                    {
+                      sbuf_[disp+sbuf_ctr_[owner]] = -1; 
+                      sbuf_ctr_[owner] += 1;
+                      stat_[owner] = '1';
 
-                    nbsend(owner);
-                  }
-                  else
-                  {
-                    sbuf_[disp+sbuf_ctr_[owner]] = -1; 
-                    sbuf_ctr_[owner] += 1;
+                      nbsend(owner);
+                    }
+                    else
+                    {
+                      sbuf_[disp+sbuf_ctr_[owner]] = -1; 
+                      sbuf_ctr_[owner] += 1;
+                    }
                   }
                 }
               }
@@ -368,8 +386,9 @@ class TriangulateAggrBuffered
                   nbar_active = true;
                 }
               }
-
-              //std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
+#if defined(DEBUG_PRINTF)
+              std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
+#endif            
             }
 
             MPI_Alltoall(rinfo_, 1, MPI_GRAPH_TYPE, srinfo_, 1, MPI_GRAPH_TYPE, comm_);
@@ -390,7 +409,7 @@ class TriangulateAggrBuffered
         
         GraphElem ntriangles_;
         GraphElem bufsize_, nghosts_, out_nghosts_, in_nghosts_;
-        GraphElem *sbuf_, *rbuf_, *prev_k_, *sbuf_ctr_, *rinfo_, *srinfo_;
+        GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *rinfo_, *srinfo_;
         MPI_Request *sreq_;
         char *stat_;
 
