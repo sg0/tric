@@ -170,7 +170,9 @@ int main(int argc, char *argv[])
 #elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
     TriangulateEstimate tr(g);
 #elif defined(AGGR_BUFR) 
-    TriangulateAggrBuffered tr(g, ((bufferSize == 0) ? DEFAULT_BUF_SIZE : bufferSize));
+    if (bufferSize == 0)
+        bufferSize = DEFAULT_BUF_SIZE;
+    TriangulateAggrBuffered tr(g, bufferSize);
 #else
     TriangulateAggrFatCompressed tr(g);
 #endif
