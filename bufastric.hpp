@@ -96,8 +96,9 @@ class TriangulateAggrBuffered
             std::memset(recv_count, 0, sizeof(GraphElem)*size_);
             
             const GraphElem lnv = g_->get_lnv();
-
+#if defined(USE_OPENMP)
             #pragma omp parallel for reduction(+:ntriangles_) default(shared)
+#endif            
             for (GraphElem i = 0; i < lnv; i++)
             {
                 GraphElem e0, e1, tup[2];
@@ -125,7 +126,9 @@ class TriangulateAggrBuffered
                     {
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
+#if defined(USE_OPENMP)
                           #pragma omp atomic update
+#endif
                           send_count[owner] += 1;
                         }
                     }
