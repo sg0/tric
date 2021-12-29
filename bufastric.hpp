@@ -62,7 +62,7 @@ class TriangulateAggrBuffered
 
         TriangulateAggrBuffered(Graph* g, const GraphElem bufsize): 
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
-            sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
+            sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), vcount_(nullptr), 
             ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0),  
             prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), bufsize_(bufsize)
         {
@@ -96,6 +96,8 @@ class TriangulateAggrBuffered
             std::memset(recv_count, 0, sizeof(GraphElem)*size_);
             
             const GraphElem lnv = g_->get_lnv();
+            vcount_ = new GraphElem[lnv];
+            std::fill(vcount_, vcount_ + lnv, 0);
 
 #if defined(USE_OPENMP)
             GraphElem *vcount = new GraphElem[lnv];
@@ -123,7 +125,13 @@ class TriangulateAggrBuffered
                             Edge const& edge_n = g_->get_edge(n);
                             tup[1] = edge_n.tail_;
                             if (check_edgelist(tup))
+                            {
+#if defined(USE_OPENMP)
                                 vcount[i] += 1;
+#else
+                                ntriangles_ += 1;
+#endif
+                            }
                         }
                     }
                     else
@@ -134,6 +142,7 @@ class TriangulateAggrBuffered
                           #pragma omp atomic update
 #endif
                           send_count[owner] += 1;
+                          vcount_[i] += 1;
                         }
                     }
                 }
@@ -173,6 +182,7 @@ class TriangulateAggrBuffered
             delete []prev_k_;
             delete []prev_m_;
             delete []stat_;
+            delete []vcount_;
         }
 
         // TODO
@@ -205,6 +215,9 @@ class TriangulateAggrBuffered
           const GraphElem lnv = g_->get_lnv();
           for (GraphElem i = 0; i < lnv; i++)
           {
+            if (vcount_[i] == 0) // all edges processed, move on
+                continue;
+
             GraphElem e0, e1;
             g_->edge_range(i, e0, e1);
 
@@ -259,6 +272,7 @@ class TriangulateAggrBuffered
                     sbuf_[disp+sbuf_ctr_[owner]] = edge_n.tail_;
                     sbuf_ctr_[owner] += 1;
                     out_nghosts_ -= 1;
+                    vcount_[i] -= 1;
                   }
 
                   if (stat_[owner] == '0') 
@@ -424,7 +438,7 @@ class TriangulateAggrBuffered
         
         GraphElem ntriangles_;
         GraphElem bufsize_, nghosts_, out_nghosts_, in_nghosts_;
-        GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *rinfo_, *srinfo_;
+        GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *rinfo_, *srinfo_, *vcount_;
         MPI_Request *sreq_;
         char *stat_;
 
