@@ -96,8 +96,12 @@ class TriangulateAggrBuffered
             std::memset(recv_count, 0, sizeof(GraphElem)*size_);
             
             const GraphElem lnv = g_->get_lnv();
+
 #if defined(USE_OPENMP)
-            #pragma omp parallel for reduction(+:ntriangles_) default(shared)
+            GraphElem *vcount = new GraphElem[lnv];
+            std::memset(vcount, 0, sizeof(GraphElem)*lnv);
+
+            #pragma omp parallel for schedule(dynamic) default(shared)
 #endif            
             for (GraphElem i = 0; i < lnv; i++)
             {
@@ -119,7 +123,7 @@ class TriangulateAggrBuffered
                             Edge const& edge_n = g_->get_edge(n);
                             tup[1] = edge_n.tail_;
                             if (check_edgelist(tup))
-                                ntriangles_ += 1;
+                                vcount[i] += 1;
                         }
                     }
                     else
@@ -134,6 +138,11 @@ class TriangulateAggrBuffered
                     }
                 }
             }
+
+#if defined(USE_OPENMP)
+            ntriangles_ = std::accumulate(vcount, vcount + lnv, 0);
+            free(vcount);
+#endif
 
             MPI_Barrier(comm_);
 
