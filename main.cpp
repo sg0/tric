@@ -188,7 +188,7 @@ int main(int argc, char *argv[])
             MPI_SUM, 0, MPI_COMM_WORLD);
     if (me == 0) 
     {   double avg_t = (double)(t_tot/(double)nprocs);
-        std::cout << "Average execution time (in s) on " << nprocs << " processes: " 
+        std::cout << "Average execution time (secs.) for distributed counting on " << nprocs << " processes: " 
             << avg_t << std::endl;
 
     if (estimateTriangles)
