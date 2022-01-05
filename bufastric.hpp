@@ -108,8 +108,8 @@ class TriangulateAggrBuffered
 #if defined(USE_OPENMP)
             GraphElem *vcount = new GraphElem[lnv];
             std::memset(vcount, 0, sizeof(GraphElem)*lnv);
-
-            #pragma omp parallel for schedule(dynamic) default(shared)
+            #pragma omp declare reduction(merge : std::vector<GraphElem> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+            #pragma omp parallel for schedule(dynamic) reduction(merge: targets) default(shared)
 #endif            
             for (GraphElem i = 0; i < lnv; i++)
             {
