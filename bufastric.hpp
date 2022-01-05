@@ -82,8 +82,8 @@ class TriangulateAggrBuffered
             sreq_     = new MPI_Request[size_];
             rbuf_     = new GraphElem[bufsize_];
 
-            // TODO FIXME size*O(size) is wasteful, process graph may be varied
-            // use pindex.size for most O(size) buffers
+            // TODO FIXME p*O(p) is wasteful, process graph may be varied;
+            // use pindex.size() for most O(p) buffers
 
             std::fill(sreq_, sreq_ + size_, MPI_REQUEST_NULL);
             std::fill(prev_k_, prev_k_ + size_, -1);
