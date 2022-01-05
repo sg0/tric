@@ -63,7 +63,7 @@ class TriangulateAggrBuffered
         TriangulateAggrBuffered(Graph* g, const GraphElem bufsize): 
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
             sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), vcount_(nullptr), 
-            ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0),  
+            ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), 
             prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), bufsize_(bufsize)
         {
             comm_ = g_->get_comm();
@@ -80,8 +80,10 @@ class TriangulateAggrBuffered
             prev_m_   = new GraphElem[size_];
             stat_     = new char[size_];
             sreq_     = new MPI_Request[size_];
-            sbuf_     = new GraphElem[(size_-1)*bufsize_];
             rbuf_     = new GraphElem[bufsize_];
+
+            // TODO FIXME size*O(size) is wasteful, process graph may be varied
+            // use pindex.size for most O(size) buffers
 
             std::fill(sreq_, sreq_ + size_, MPI_REQUEST_NULL);
             std::fill(prev_k_, prev_k_ + size_, -1);
@@ -98,6 +100,8 @@ class TriangulateAggrBuffered
             const GraphElem lnv = g_->get_lnv();
             vcount_ = new GraphElem[lnv];
             std::fill(vcount_, vcount_ + lnv, 0);
+
+            std::vector<GraphElem> targets;
 
             double t0 = MPI_Wtime();
 
@@ -138,6 +142,10 @@ class TriangulateAggrBuffered
                     }
                     else
                     {
+                        if (std::find(targets.begin(), targets.end(), owner) 
+                                == targets.end())
+                            targets.push_back(owner);
+
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
 #if defined(USE_OPENMP)
@@ -180,6 +188,13 @@ class TriangulateAggrBuffered
 
             free(send_count);
             free(recv_count);
+
+            for (int i = 0; i < targets.size(); i++)
+                pindex_.insert({targets[i], (GraphElem)i});
+            
+            sbuf_ = new GraphElem[pindex_.size()*bufsize_];
+
+            targets.clear();
         }
 
         ~TriangulateAggrBuffered() {}
@@ -196,6 +211,8 @@ class TriangulateAggrBuffered
             delete []prev_m_;
             delete []stat_;
             delete []vcount_;
+
+            pindex_.clear();
         }
 
         // TODO
@@ -207,8 +224,7 @@ class TriangulateAggrBuffered
         {
             if (sbuf_ctr_[owner] > 0)
             {
-                const GraphElem idx = (owner > rank_) ? (owner-1) : owner;
-                MPI_Isend(&sbuf_[idx*bufsize_], sbuf_ctr_[owner], 
+                MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[owner], 
                         MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[owner]);
             }
         }
@@ -249,7 +265,7 @@ class TriangulateAggrBuffered
 
                 if (m >= prev_m_[owner])
                 {
-                  const GraphElem disp = (owner > rank_) ? (owner-1)*bufsize_ : owner*bufsize_;
+                  const GraphElem disp = pindex_[owner]*bufsize_;
                   
                   if (sbuf_ctr_[owner] == (bufsize_-1))
                   {
@@ -454,8 +470,9 @@ class TriangulateAggrBuffered
         GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *rinfo_, *srinfo_, *vcount_;
         MPI_Request *sreq_;
         char *stat_;
-
+        
         int rank_, size_;
+        std::unordered_map<GraphElem, GraphElem> pindex_; 
         MPI_Comm comm_;
 };
 #endif
