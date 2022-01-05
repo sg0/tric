@@ -150,11 +150,11 @@ int main(int argc, char *argv[])
     if (me == 0)  
     {
         if (!generateGraph)
-            std::cout << "Time to read input file and create distributed graph (in s): " 
+            std::cout << "Time to read input file and create distributed graph (secs.): " 
                 << tdt << std::endl;
         else
             std::cout << "Time to generate distributed graph of " 
-                << nvRGG << " vertices (in s): " << tdt << std::endl;
+                << nvRGG << " vertices (secs.): " << tdt << std::endl;
     }
 
 #if defined(NO_AGGR)    
