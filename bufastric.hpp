@@ -52,9 +52,6 @@
 #define TAG_DATA 100
 #endif
 
-#ifndef TAG_STAT
-#define TAG_STAT 200
-#endif
 
 class TriangulateAggrBuffered
 {
