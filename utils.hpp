@@ -86,7 +86,7 @@ extern unsigned seed;
 
 #if defined(AGGR_BUFR)
 #ifndef DEFAULT_BUF_SIZE
-#define DEFAULT_BUF_SIZE   (1048576)
+#define DEFAULT_BUF_SIZE   (8000)
 #endif
 #endif
 

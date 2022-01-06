@@ -66,10 +66,7 @@ class TriangulateAggrBuffered
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
             MPI_Comm_rank(comm_, &rank_);
-
-            if (!bufsize_)
-                bufsize_ = 32768;
-            
+           
             sbuf_ctr_ = new GraphElem[size_];
             rinfo_    = new GraphElem[size_];
             srinfo_   = new GraphElem[size_];
