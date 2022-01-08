@@ -65,6 +65,8 @@
 #include "bfastric.hpp"
 #elif defined(AGGR_BUFR) // aggregate buffered
 #include "bufastric.hpp"
+#elif defined(AGGR_BUFR_RMA)
+#include "rmabufastric.hpp"
 #elif defined(STM8_ONESIDED)
 #include "estric.hpp"
 #elif defined(ESTIMATE_COUNTS)
@@ -169,10 +171,14 @@ int main(int argc, char *argv[])
     TriangulateAggrFatBatch tr(g);
 #elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
     TriangulateEstimate tr(g);
-#elif defined(AGGR_BUFR) 
+#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) 
     if (bufferSize < 100)
         bufferSize = DEFAULT_BUF_SIZE;
+#if defined(AGGR_BUFR)
     TriangulateAggrBuffered tr(g, bufferSize);
+#else
+    TriangulateAggrBufferedRMA tr(g, bufferSize);
+#endif
 #else
     TriangulateAggrFatCompressed tr(g);
 #endif
