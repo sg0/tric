@@ -53,11 +53,11 @@ class TriangulateAggrBufferedRMA
     public:
 
         TriangulateAggrBufferedRMA(Graph* g, const GraphElem bufsize): 
-            g_(g), sbuf_ctr_(nullptr), rbuf_(nullptr), sbuf_(nullptr), win_(MPI_WIN_NULL),
-            pdegree_(-1), displs_(nullptr), rcounts_(nullptr), rinfo_(nullptr), srinfo_(nullptr), 
-            vcount_(nullptr), gcomm_(MPI_COMM_NULL), ntriangles_(0), nghosts_(0), out_nghosts_(0), 
-            in_nghosts_(0), pindex_(0), prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), targets_(0), 
-            bufsize_(bufsize)
+            g_(g), sbuf_ctr_(nullptr), rbuf_(nullptr), sbuf_(nullptr), win_(MPI_WIN_NULL), sreq_(nullptr),
+            pdegree_(-1), displs_(nullptr), scounts_(nullptr), rcounts_(nullptr), rinfo_(nullptr), 
+            srinfo_(nullptr), vcount_(nullptr), gcomm_(MPI_COMM_NULL), ntriangles_(0), nghosts_(0), 
+            out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), 
+            targets_(0), bufsize_(bufsize)
         {
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
@@ -164,19 +164,23 @@ class TriangulateAggrBufferedRMA
             pdegree_ = pindex_.size();
              
             sbuf_ctr_ = new GraphElem[pdegree_];
-            rinfo_    = new GraphElem[pdegree_];
+            scounts_  = new GraphElem[pdegree_];
             rcounts_  = new GraphElem[pdegree_];
             srinfo_   = new GraphElem[pdegree_];
+            rinfo_    = new GraphElem[pdegree_];
             prev_k_   = new GraphElem[pdegree_];
             prev_m_   = new GraphElem[pdegree_];
             stat_     = new char[pdegree_];
             sbuf_     = new GraphElem[pdegree_*bufsize_];
             displs_   = new GraphElem[pdegree_];
- 
+            sreq_     = new MPI_Request[pdegree_];
+
+            std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
             std::fill(prev_k_, prev_k_ + pdegree_, -1);
             std::fill(prev_m_, prev_m_ + pdegree_, -1);
-            std::fill(rinfo_, rinfo_ + pdegree_, 0);
+            std::fill(scounts_, scounts_ + pdegree_, 0);
             std::fill(rcounts_, rcounts_ + pdegree_, 0);
+            std::fill(rinfo_, rinfo_ + pdegree_, 0);
             std::fill(stat_, stat_ + pdegree_, '0');
             std::fill(sbuf_ctr_, sbuf_ctr_ + pdegree_, 0);
             std::fill(displs_, displs_ + pdegree_, 0);
@@ -210,10 +214,12 @@ class TriangulateAggrBufferedRMA
         void clear()
         {
             delete []sbuf_;
+            delete []sreq_;
             delete []sbuf_ctr_;
+            delete []scounts_;
+            delete []rcounts_;
             delete []srinfo_;
             delete []rinfo_;
-            delete []rcounts_;
             delete []prev_k_;
             delete []prev_m_;
             delete []stat_;
@@ -238,13 +244,13 @@ class TriangulateAggrBufferedRMA
             if (sbuf_ctr_[pindex_[owner]] > 0)
             {
 #if defined(USE_MPI_ACCUMULATE)
-                MPI_Accumulate(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
+                MPI_Raccumulate(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
                         (MPI_Aint)(displs_[pindex_[owner]*bufsize_] + sbuf_ctr_[pindex_[owner]]), 
-                        sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, MPI_REPLACE, win_);
+                        sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, MPI_REPLACE, win_, &sreq_[pindex_[owner]]);
 #else
-                MPI_Put(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
+                MPI_Rput(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
                         (MPI_Aint)(displs_[pindex_[owner]*bufsize_] + sbuf_ctr_[pindex_[owner]]), 
-                        sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_);
+                        sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, &sreq_[pindex_[owner]]);
 #endif
             }
         }
@@ -365,10 +371,9 @@ class TriangulateAggrBufferedRMA
 
         inline void process_messages()
         {
-            
             MPI_Win_flush_all(win_);
-            
-            MPI_Neighbor_alltoall(sbuf_ctr_, 1, MPI_GRAPH_TYPE, 
+                         
+            MPI_Neighbor_alltoall(scounts_, 1, MPI_GRAPH_TYPE, 
                     rcounts_, 1, MPI_GRAPH_TYPE, gcomm_);
  
             for (GraphElem p = 0; p < pdegree_; p++)
@@ -409,25 +414,11 @@ class TriangulateAggrBufferedRMA
         {
             bool done = false, nbar_active = false, sends_done = false;
             MPI_Request nbar_req = MPI_REQUEST_NULL;
+            int *inds = new int[pdegree_];
+            int over = -1;
 
             while(!done)
             {  
-              if (out_nghosts_ == 0)
-              {
-                  if (!sends_done)
-                  {
-                      nbput();
-                      sends_done = true;
-                  }
-              }
-              else
-                lookup_edges();
-
-              process_messages();
-
-              std::fill(stat_, stat_ + pdegree_, '0');
-              std::fill(sbuf_ctr_, sbuf_ctr_ + pdegree_, 0);
-
               if (nbar_active)
               {
                 int test_nbar = -1;
@@ -442,6 +433,32 @@ class TriangulateAggrBufferedRMA
                   nbar_active = true;
                 }
               }
+
+              if (out_nghosts_ == 0)
+              {
+                  if (!sends_done)
+                  {
+                      nbput();
+                      sends_done = true;
+                  }
+              }
+              else
+                lookup_edges();
+              
+              std::fill(scounts_, scounts_ + pdegree_, 0);
+              MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
+
+              if (over != MPI_UNDEFINED)
+              { 
+                  for (int i = 0; i < over; i++)
+                  {
+                      scounts_[inds[i]] = sbuf_ctr_[inds[i]];
+                      sbuf_ctr_[inds[i]] = 0;
+                      stat_[inds[i]] = '0';
+                  }
+              }
+
+              process_messages();
 
 #if defined(DEBUG_PRINTF)
               std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
@@ -463,8 +480,10 @@ class TriangulateAggrBufferedRMA
         Graph* g_;
         
         GraphElem ntriangles_, pdegree_, bufsize_, nghosts_, out_nghosts_, in_nghosts_;
-        GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *displs_, *sbuf_ctr_, *rcounts_, *rinfo_, *srinfo_, *vcount_;
+        GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *displs_, *sbuf_ctr_, *scounts_, *rcounts_, *rinfo_, *srinfo_, *vcount_;
         char *stat_;
+        
+        MPI_Request *sreq_;
         
         int rank_, size_;
         std::unordered_map<GraphElem, GraphElem> pindex_; 
