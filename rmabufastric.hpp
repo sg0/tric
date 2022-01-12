@@ -245,12 +245,12 @@ class TriangulateAggrBufferedRMA
             {
 #if defined(USE_MPI_ACCUMULATE)
                 MPI_Raccumulate(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
-                        (MPI_Aint)(displs_[pindex_[owner]] + sbuf_ctr_[pindex_[owner]]), 
-                        sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, MPI_REPLACE, win_, &sreq_[pindex_[owner]]);
+                        (MPI_Aint)(displs_[pindex_[owner]]), sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, MPI_REPLACE, 
+                        win_, &sreq_[pindex_[owner]]);
 #else
                 MPI_Rput(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
-                        (MPI_Aint)(displs_[pindex_[owner]] + sbuf_ctr_[pindex_[owner]]), 
-                        sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, &sreq_[pindex_[owner]]);
+                        (MPI_Aint)(displs_[pindex_[owner]]), sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, 
+                        win_, &sreq_[pindex_[owner]]);
 #endif
             }
         }
@@ -425,21 +425,6 @@ class TriangulateAggrBufferedRMA
 
             while(!done)
             {  
-              if (nbar_active)
-              {
-                int test_nbar = -1;
-                MPI_Test(&nbar_req, &test_nbar, MPI_STATUS_IGNORE);
-                done = !test_nbar ? false : true;
-              }
-              else
-              {
-                if (in_nghosts_ == 0)
-                {
-                  MPI_Ibarrier(comm_, &nbar_req);
-                  nbar_active = true;
-                }
-              }
-
               if (out_nghosts_ == 0)
               {
                   if (!sends_done)
@@ -465,6 +450,21 @@ class TriangulateAggrBufferedRMA
               }
 
               process_messages();
+              
+              if (nbar_active)
+              {
+                int test_nbar = -1;
+                MPI_Test(&nbar_req, &test_nbar, MPI_STATUS_IGNORE);
+                done = !test_nbar ? false : true;
+              }
+              else
+              {
+                if (in_nghosts_ == 0)
+                {
+                  MPI_Ibarrier(comm_, &nbar_req);
+                  nbar_active = true;
+                }
+              }
 
 #if defined(DEBUG_PRINTF)
               std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
