@@ -245,11 +245,11 @@ class TriangulateAggrBufferedRMA
             {
 #if defined(USE_MPI_ACCUMULATE)
                 MPI_Raccumulate(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
-                        (MPI_Aint)(displs_[pindex_[owner]*bufsize_] + sbuf_ctr_[pindex_[owner]]), 
+                        (MPI_Aint)(displs_[pindex_[owner]] + sbuf_ctr_[pindex_[owner]]), 
                         sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, MPI_REPLACE, win_, &sreq_[pindex_[owner]]);
 #else
                 MPI_Rput(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
-                        (MPI_Aint)(displs_[pindex_[owner]*bufsize_] + sbuf_ctr_[pindex_[owner]]), 
+                        (MPI_Aint)(displs_[pindex_[owner]] + sbuf_ctr_[pindex_[owner]]), 
                         sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_, &sreq_[pindex_[owner]]);
 #endif
             }
@@ -279,40 +279,41 @@ class TriangulateAggrBufferedRMA
             {
               EdgeStat& edge = g_->get_edge_stat(m);
               const int owner = g_->get_owner(edge.edge_->tail_);
+              const GraphElem pidx = pindex_[owner];
 
               if (owner != rank_ && edge.active_)
               {               
-                if (stat_[pindex_[owner]] == '1') 
+                if (stat_[pidx] == '1') 
                   continue;
 
-                if (m >= prev_m_[pindex_[owner]])
+                if (m >= prev_m_[pidx])
                 {
-                  const GraphElem disp = pindex_[owner]*bufsize_;
+                  const GraphElem disp = pidx*bufsize_;
                   
-                  if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
+                  if (sbuf_ctr_[pidx] == (bufsize_-1))
                   {
-                    prev_m_[pindex_[owner]] = m;
-                    prev_k_[pindex_[owner]] = -1;
-                    stat_[pindex_[owner]]   = '1'; // messages in-flight
+                    prev_m_[pidx] = m;
+                    prev_k_[pidx] = -1;
+                    stat_[pidx]   = '1'; // messages in-flight
 
                     nbput(owner);
 
                     continue;
                   }
 
-                  sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge.edge_->tail_;
-                  sbuf_ctr_[pindex_[owner]] += 1;
+                  sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
+                  sbuf_ctr_[pidx] += 1;
 
-                  for (GraphElem n = ((prev_k_[pindex_[owner]] == -1) ? (m + 1) : prev_k_[pindex_[owner]]); n < e1; n++)
+                  for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
                   {
-                    if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
+                    if (sbuf_ctr_[pidx] == (bufsize_-1))
                     {
-                      prev_m_[pindex_[owner]] = m;
-                      prev_k_[pindex_[owner]] = n;
+                      prev_m_[pidx] = m;
+                      prev_k_[pidx] = n;
 
-                      sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = -1; // demarcate vertex boundary
-                      sbuf_ctr_[pindex_[owner]] += 1;
-                      stat_[pindex_[owner]] = '1'; 
+                      sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
+                      sbuf_ctr_[pidx] += 1;
+                      stat_[pidx] = '1'; 
 
                       nbput(owner);
 
@@ -320,31 +321,31 @@ class TriangulateAggrBufferedRMA
                     }
 
                     Edge const& edge_n = g_->get_edge(n);
-                    sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge_n.tail_;
-                    sbuf_ctr_[pindex_[owner]] += 1;
+                    sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
+                    sbuf_ctr_[pidx] += 1;
                     out_nghosts_ -= 1;
                     vcount_[i] -= 1;
                   }
 
-                  if (stat_[pindex_[owner]] == '0') 
+                  if (stat_[pidx] == '0') 
                   {
-                    prev_m_[pindex_[owner]] = m;
-                    prev_k_[pindex_[owner]] = -1;
+                    prev_m_[pidx] = m;
+                    prev_k_[pidx] = -1;
 
                     edge.active_ = false;
 
-                    if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
+                    if (sbuf_ctr_[pidx] == (bufsize_-1))
                     {
-                      sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = -1; 
-                      sbuf_ctr_[pindex_[owner]] += 1;
-                      stat_[pindex_[owner]] = '1';
+                      sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                      sbuf_ctr_[pidx] += 1;
+                      stat_[pidx] = '1';
 
                       nbput(owner);
                     }
                     else
                     {
-                      sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = -1; 
-                      sbuf_ctr_[pindex_[owner]] += 1;
+                      sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                      sbuf_ctr_[pidx] += 1;
                     }
                   }
                 }
@@ -370,12 +371,17 @@ class TriangulateAggrBufferedRMA
         }
 
         inline void process_messages()
-        {
+        {     
             MPI_Win_flush_all(win_);
-                         
+            
             MPI_Neighbor_alltoall(scounts_, 1, MPI_GRAPH_TYPE, 
                     rcounts_, 1, MPI_GRAPH_TYPE, gcomm_);
- 
+
+            GraphElem count = std::accumulate(rcounts_, rcounts_ + pdegree_, 0);
+            
+            if (count == 0)
+                return;
+
             for (GraphElem p = 0; p < pdegree_; p++)
             {
                 GraphElem tup[2] = {-1,-1}, prev = 0;
@@ -455,7 +461,7 @@ class TriangulateAggrBufferedRMA
                       scounts_[inds[i]] = sbuf_ctr_[inds[i]];
                       sbuf_ctr_[inds[i]] = 0;
                       stat_[inds[i]] = '0';
-                  }
+                  } 
               }
 
               process_messages();
@@ -464,8 +470,10 @@ class TriangulateAggrBufferedRMA
               std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
 #endif            
             }
-
-            MPI_Neighbor_alltoall(rinfo_, 1, MPI_GRAPH_TYPE, srinfo_, 1, MPI_GRAPH_TYPE, gcomm_);
+            
+            MPI_Neighbor_alltoall(rinfo_, 1, MPI_GRAPH_TYPE, srinfo_, 
+                    1, MPI_GRAPH_TYPE, gcomm_);
+            
             for (int p = 0; p < pdegree_; p++)
                 ntriangles_ += srinfo_[p];
             
