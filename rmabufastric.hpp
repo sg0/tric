@@ -384,59 +384,62 @@ class TriangulateAggrBufferedRMA
         }
 
         inline void process_messages()
-        {     
-            MPI_Win_flush_all(win_);
-            
+        {      
             MPI_Neighbor_alltoall(scounts_, 1, MPI_GRAPH_TYPE, 
                     rcounts_, 1, MPI_GRAPH_TYPE, gcomm_);
 
-            GraphElem count = std::accumulate(rcounts_, rcounts_ + pdegree_, 0);
-            
-            if (count == 0)
-                return;
-
             for (GraphElem p = 0; p < pdegree_; p++)
             {
-                GraphElem tup[2] = {-1,-1}, prev = 0;
-                
-                for (GraphElem k = 0; k < rcounts_[p];)
+                if (rcounts_[p] > 0)
                 {
-                    if (wbuf_[p*bufsize_+k] == -1)
-                        continue;
-
-                    tup[0] = wbuf_[p*bufsize_+k];
-                    GraphElem curr_count = 0;
-
-                    for (GraphElem m = k + 1; m < rcounts_[p]; m++)
+                    GraphElem tup[2] = {-1,-1}, prev = 0;
+                    for (GraphElem k = 0; k < rcounts_[p];)
                     {
-                        if (wbuf_[p*bufsize_+m] == -1)
+                        if (wbuf_[p*bufsize_+k] == -1)
+                            continue;
+
+                        tup[0] = wbuf_[p*bufsize_+k];
+                        GraphElem curr_count = 0;
+
+                        for (GraphElem m = k + 1; m < rcounts_[p]; m++)
                         {
-                            curr_count = m + 1;
-                            break;
+                            if (wbuf_[p*bufsize_+m] == -1)
+                            {
+                                curr_count = m + 1;
+                                break;
+                            }
+
+                            tup[1] = wbuf_[p*bufsize_+m];
+
+                            if (check_edgelist(tup))
+                                rinfo_[p] += 1; // valid edge 
+
+                            in_nghosts_ -= 1;
                         }
 
-                        tup[1] = wbuf_[p*bufsize_+m];
-
-                        if (check_edgelist(tup))
-                            rinfo_[p] += 1; // valid edge 
-
-                        in_nghosts_ -= 1;
+                        k += (curr_count - prev);
+                        prev = k;
                     }
-
-                    k += (curr_count - prev);
-                    prev = k;
                 }
             }
         }
 
         inline GraphElem count()
         {
-            bool done = false, nbar_active = false, sends_done = false;
+#if defined(COLL_EXIT)
+#else
+            bool done = false, nbar_active = false;
             MPI_Request nbar_req = MPI_REQUEST_NULL;
+#endif
+            bool sends_done = false;
             int *inds = new int[pdegree_];
             int over = -1;
 
+#if defined(COLL_EXIT)
+            while(1)
+#else
             while(!done)
+#endif
             {  
               if (out_nghosts_ == 0)
               {
@@ -448,9 +451,9 @@ class TriangulateAggrBufferedRMA
               }
               else
                 lookup_edges();
-
-              std::fill(scounts_, scounts_ + pdegree_, 0);
+ 
               MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
+              std::fill(scounts_, scounts_ + pdegree_, 0);
 
               if (over != MPI_UNDEFINED)
               { 
@@ -459,11 +462,27 @@ class TriangulateAggrBufferedRMA
                       scounts_[inds[i]] = sbuf_ctr_[inds[i]];
                       sbuf_ctr_[inds[i]] = 0;
                       stat_[inds[i]] = '0';
+
+                      MPI_Win_flush(targets_[inds[i]], win_);
                   } 
               }            
-
+              
               process_messages();
- 
+                 
+#if defined(COLL_EXIT)
+              GraphElem count = 0;
+#if defined(USE_ALLRED_EXIT)
+              count = in_nghosts_;
+              MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
+#else
+              std::fill(scounts_, scounts_ + pdegree_, in_nghosts_);
+              MPI_Neighbor_alltoall(scounts_, 1, MPI_GRAPH_TYPE, 
+                      rcounts_, 1, MPI_GRAPH_TYPE, gcomm_);
+              count = std::accumulate(rcounts_, rcounts_ + pdegree_, 0);
+#endif
+              if (count == 0)
+                  break;
+#else
               if (nbar_active)
               {
                 int test_nbar = -1;
@@ -478,7 +497,7 @@ class TriangulateAggrBufferedRMA
                   nbar_active = true;
                 }
               }
-
+#endif              
 #if defined(DEBUG_PRINTF)
               std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
 #endif            
