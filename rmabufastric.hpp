@@ -426,20 +426,12 @@ class TriangulateAggrBufferedRMA
 
         inline GraphElem count()
         {
-#if defined(COLL_EXIT)
-#else
-            bool done = false, nbar_active = false;
-            MPI_Request nbar_req = MPI_REQUEST_NULL;
-#endif
             bool sends_done = false;
             int *inds = new int[pdegree_];
             int over = -1;
+            GraphElem count = 0;
 
-#if defined(COLL_EXIT)
             while(1)
-#else
-            while(!done)
-#endif
             {  
               if (out_nghosts_ == 0)
               {
@@ -469,9 +461,7 @@ class TriangulateAggrBufferedRMA
               
               process_messages();
                  
-#if defined(COLL_EXIT)
-              GraphElem count = 0;
-#if defined(USE_ALLRED_EXIT)
+#if defined(USE_ALLREDUCE_FOR_EXIT)
               count = in_nghosts_;
               MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
 #else
@@ -482,24 +472,8 @@ class TriangulateAggrBufferedRMA
 #endif
               if (count == 0)
                   break;
-#else
-              if (nbar_active)
-              {
-                int test_nbar = -1;
-                MPI_Test(&nbar_req, &test_nbar, MPI_STATUS_IGNORE);
-                done = !test_nbar ? false : true;
-              }
-              else
-              {
-                if (in_nghosts_ == 0)
-                {
-                  MPI_Ibarrier(comm_, &nbar_req);
-                  nbar_active = true;
-                }
-              }
-#endif              
 #if defined(DEBUG_PRINTF)
-              std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
+              std::cout << "#incoming/outgoing count: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
 #endif            
             }
             
