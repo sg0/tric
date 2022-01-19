@@ -204,7 +204,7 @@ int main(int argc, char *argv[])
         std::cout << "Number of triangles: " << ntris << std::endl;
 #endif
     else
-#if defined(AGGR_BUFR)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA)
         std::cout << "Per-PE buffer count: " << bufferSize << std::endl;
 #endif
         std::cout << "Number of triangles: " << ntris << std::endl;
