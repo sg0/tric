@@ -253,7 +253,7 @@ class TriangulateAggrBufferedRMA
         {
         }
 
-        void nbput(GraphElem owner)
+        inline void rput(GraphElem owner)
         {
             if (sbuf_ctr_[pindex_[owner]] > 0)
             {
@@ -269,12 +269,32 @@ class TriangulateAggrBufferedRMA
             }
         }
         
-        void nbput()
+        inline void rput()
         {
           for (int const& p : targets_)
-              nbput(p);
+              rput(p);
+        }
+ 
+        inline void put(GraphElem owner)
+        {
+            if (sbuf_ctr_[pindex_[owner]] > 0)
+            {
+#if defined(USE_MPI_ACCUMULATE)
+                MPI_Accumulate(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
+                        (MPI_Aint)(displs_[pindex_[owner]]), sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, MPI_REPLACE);
+#else
+                MPI_Put(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, owner, 
+                        (MPI_Aint)(displs_[pindex_[owner]]), sbuf_ctr_[pindex_[owner]], MPI_GRAPH_TYPE, win_);
+#endif
+            }
         }
         
+        inline void put()
+        {
+          for (int const& p : targets_)
+              put(p);
+        }     
+
         inline void lookup_edges()
         {
           const GraphElem lnv = g_->get_lnv();
@@ -307,8 +327,11 @@ class TriangulateAggrBufferedRMA
                     prev_m_[pidx] = m;
                     prev_k_[pidx] = -1;
                     stat_[pidx]   = '1'; // messages in-flight
-
-                    nbput(owner);
+#if defined(USE_MPI_RPUT)
+                    rput(owner);
+#else
+                    put(owner);
+#endif
 
                     continue;
                   }
@@ -328,8 +351,11 @@ class TriangulateAggrBufferedRMA
                       sbuf_ctr_[pidx] += 1;
                       stat_[pidx] = '1'; 
 
-                      nbput(owner);
-
+#if defined(USE_MPI_RPUT)
+                      rput(owner);
+#else
+                      put(owner);
+#endif
                       break;
                     }
 
@@ -352,8 +378,11 @@ class TriangulateAggrBufferedRMA
                       sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
                       sbuf_ctr_[pidx] += 1;
                       stat_[pidx] = '1';
-
-                      nbput(owner);
+#if defined(USE_MPI_RPUT)
+                      rput(owner);
+#else
+                      put(owner);
+#endif
                     }
                     else
                     {
@@ -427,9 +456,11 @@ class TriangulateAggrBufferedRMA
         inline GraphElem count()
         {
             bool sends_done = false;
+            GraphElem count = 0;
+#if defined(USE_MPI_RPUT)
             int *inds = new int[pdegree_];
             int over = -1;
-            GraphElem count = 0;
+#endif
 
             while(1)
             {  
@@ -437,13 +468,18 @@ class TriangulateAggrBufferedRMA
               {
                   if (!sends_done)
                   {
-                      nbput();
+#if defined(USE_MPI_RPUT)
+                      rput();
+#else
+                      put();
+#endif
                       sends_done = true;
                   }
               }
               else
                 lookup_edges();
  
+#if defined(USE_MPI_RPUT)
               MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
               std::fill(scounts_, scounts_ + pdegree_, 0);
 
@@ -462,7 +498,27 @@ class TriangulateAggrBufferedRMA
 #else
                   MPI_Win_flush_all(win_);
 #endif
-              }            
+              } 
+#else
+              MPI_Win_flush_all(win_);
+              
+              for (GraphElem p = 0; p < pdegree_; p++)
+              {
+                  if (sbuf_ctr_[p] == bufsize_)
+                  {
+                      scounts_[p] = sbuf_ctr_[p];
+                      sbuf_ctr_[p] = 0;
+                      stat_[p] = '0';
+                  }
+              }
+
+              if (sends_done)
+              {
+                  std::memcpy(scounts_, sbuf_ctr_, pdegree_*sizeof(GraphElem));
+                  std::fill(sbuf_ctr_, sbuf_ctr_ + pdegree_, 0);
+                  std::fill(stat_, stat_ + pdegree_, '0');
+              }
+#endif
               
               process_messages();
                  
