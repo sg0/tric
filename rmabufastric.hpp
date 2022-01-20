@@ -384,10 +384,10 @@ class TriangulateAggrBufferedRMA
         }
 
         inline void process_messages()
-        {      
+        {  
             MPI_Neighbor_alltoall(scounts_, 1, MPI_GRAPH_TYPE, 
                     rcounts_, 1, MPI_GRAPH_TYPE, gcomm_);
-
+     
             for (GraphElem p = 0; p < pdegree_; p++)
             {
                 if (rcounts_[p] > 0)
@@ -454,9 +454,14 @@ class TriangulateAggrBufferedRMA
                       scounts_[inds[i]] = sbuf_ctr_[inds[i]];
                       sbuf_ctr_[inds[i]] = 0;
                       stat_[inds[i]] = '0';
-
+#if defined(USE_WIN_FLUSH)
                       MPI_Win_flush(targets_[inds[i]], win_);
-                  } 
+#endif
+                  }
+#if defined(USE_WIN_FLUSH)
+#else
+                  MPI_Win_flush_all(win_);
+#endif
               }            
               
               process_messages();
