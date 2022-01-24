@@ -207,7 +207,7 @@ class TriangulateAggrBufferedRMA
             MPI_Win_lock_all(MPI_MODE_NOCHECK, win_);
 #if defined(USE_MPI_RPUT) || defined(USE_NBR_A2A_ITER)
 #else
-            MPI_Win_create(&rcounts_, pdegree_*sizeof(GraphElem), 
+            MPI_Win_create(rcounts_, pdegree_*sizeof(GraphElem), 
                     sizeof(GraphElem), info, gcomm_, &cwin_);             
             MPI_Win_lock_all(MPI_MODE_NOCHECK, cwin_);
 #endif
