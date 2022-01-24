@@ -48,13 +48,6 @@
 #include <iomanip>
 #include <limits>
 
-#if defined(USE_NBR_A2A_ITER)
-#else
-#ifndef TAG_COUNT
-#define TAG_COUNT 100
-#endif
-#endif
-
 class TriangulateAggrBufferedRMA
 {
     public:
