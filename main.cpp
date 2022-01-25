@@ -177,7 +177,7 @@ int main(int argc, char *argv[])
 #if defined(AGGR_BUFR)
     TriangulateAggrBuffered tr(g, bufferSize);
 #else
-    TriangulateAggrBufferedRMA tr(g, bufferSize);
+    TriangulateAggrBufferedRMA2 tr(g, bufferSize);
 #endif
 #else
     TriangulateAggrFatCompressed tr(g);
