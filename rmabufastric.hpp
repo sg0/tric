@@ -700,7 +700,7 @@ class TriangulateAggrBufferedRMA2
 #endif
 
             MPI_Win_allocate(pdegree_*bufsize_*sizeof(GraphElem), 
-                    sizeof(GraphElem), info, comm_, &wbuf_, &win_);             
+                    sizeof(GraphElem), info, gcomm_, &wbuf_, &win_);             
             MPI_Win_lock_all(MPI_MODE_NOCHECK, win_);
 #if defined(USE_MPI_RPUT) || defined(USE_NBR_A2A_ITER)
 #else
