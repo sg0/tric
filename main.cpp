@@ -67,6 +67,8 @@
 #include "bufastric.hpp"
 #elif defined(AGGR_BUFR_RMA)
 #include "rmabufastric.hpp"
+#elif defined(AGGR_HEUR) // comm-avoiding heuristics
+#include "hbufastric.hpp"
 #elif defined(STM8_ONESIDED)
 #include "estric.hpp"
 #elif defined(ESTIMATE_COUNTS)
@@ -173,13 +175,15 @@ int main(int argc, char *argv[])
     TriangulateAggrFatBatch tr(g);
 #elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
     TriangulateEstimate tr(g);
-#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) 
+#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) 
     if (bufferSize < 100)
         bufferSize = DEFAULT_BUF_SIZE;
 #if defined(AGGR_BUFR)
     TriangulateAggrBuffered tr(g, bufferSize);
-#else
+#elif defined(AGGR_BUFR_RMA)
     TriangulateAggrBufferedRMA tr(g, bufferSize);
+#else
+    TriangulateAggrBufferedHeuristics tr(g, bufferSize);
 #endif
 #else
     TriangulateAggrFatCompressed tr(g);
@@ -206,7 +210,7 @@ int main(int argc, char *argv[])
         std::cout << "Number of triangles: " << ntris << std::endl;
 #endif
     else
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR)
         std::cout << "Per-PE buffer count: " << bufferSize << std::endl;
 #endif
         std::cout << "Number of triangles: " << ntris << std::endl;
