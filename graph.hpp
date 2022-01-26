@@ -429,6 +429,7 @@ class BinaryEdgeList
             g->edge_indices_[0] = 0;
             
 #if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) 
+            MPI_Barrier(comm_);
             for (GraphElem i=0; i < g->edge_list_.size(); i++)
                 g->edge_stat_.emplace_back((Edge const*)&g->edge_list_[i]);
 #endif
@@ -592,6 +593,7 @@ class BinaryEdgeList
             g->edge_indices_[0] = 0;
 
 #if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) 
+            MPI_Barrier(comm_);
             for (GraphElem i=0; i < g->edge_list_.size(); i++)
                 g->edge_stat_.emplace_back((Edge const*)&g->edge_list_[i]);
 #endif

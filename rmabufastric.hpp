@@ -191,7 +191,7 @@ class TriangulateAggrBufferedRMA
             displs_   = new GraphElem[pdegree_]();
             sreq_     = new MPI_Request[pdegree_];
             
-            MPI_Barrier(comm_);
+            GraphElem disp = 0;
 
             for (GraphElem p = 0; p < pdegree_; p++)
             {
@@ -199,18 +199,12 @@ class TriangulateAggrBufferedRMA
               prev_k_[p] = -1;
               stat_[p] = '0';
               sreq_[p] = MPI_REQUEST_NULL;
+              scounts_[p] = disp;
+              disp += bufsize_;
             }
             
             MPI_Barrier(comm_);
 
-            GraphElem disp = 0;
-
-            for (GraphElem t = 0; t < pdegree_; t++)
-            {
-                scounts_[t] = disp;
-                disp += bufsize_;
-            }
-            
             MPI_Neighbor_alltoall(scounts_, 1, MPI_GRAPH_TYPE, 
                     displs_, 1, MPI_GRAPH_TYPE, gcomm_);
             
@@ -392,8 +386,6 @@ class TriangulateAggrBufferedRMA
             MPI_Neighbor_alltoall(scounts_, 1, MPI_GRAPH_TYPE, 
                     rcounts_, 1, MPI_GRAPH_TYPE, gcomm_);
 
-            MPI_Win_sync(win_);
-
             for (GraphElem p = 0; p < pdegree_; p++)
             {
                 if (rcounts_[p] > 0)
@@ -476,7 +468,6 @@ class TriangulateAggrBufferedRMA
               count = in_nghosts_;
               MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
 #else
-
               std::fill(scounts_, scounts_ + pdegree_, in_nghosts_);
               MPI_Neighbor_alltoall(scounts_, 1, MPI_GRAPH_TYPE, 
                   rcounts_, 1, MPI_GRAPH_TYPE, gcomm_);

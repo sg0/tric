@@ -158,6 +158,8 @@ int main(int argc, char *argv[])
             std::cout << "Time to generate distributed graph of " 
                 << nvRGG << " vertices (secs.): " << tdt << std::endl;
     }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
 
 #if defined(NO_AGGR)    
     Triangulate tr(g);
