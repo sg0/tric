@@ -57,7 +57,7 @@ class TriangulateAggrBufferedRMA
             pdegree_(-1), displs_(nullptr), scounts_(nullptr), rcounts_(nullptr), rinfo_(nullptr), 
             srinfo_(nullptr), vcount_(nullptr), gcomm_(MPI_COMM_NULL), ntriangles_(0), nghosts_(0), 
             out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), 
-            sources_(0), targets_(0), bufsize_(bufsize)
+            targets_(0), bufsize_(bufsize)
         {
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
@@ -113,13 +113,8 @@ class TriangulateAggrBufferedRMA
                     else
                     {
                       if (std::find(targets_.begin(), targets_.end(), owner) 
-                          == targets_.end()
-                          && std::find(sources_.begin(), sources_.end(), owner) 
-                          == sources_.end())
-                      {
+                          == targets_.end())
                         targets_.push_back(owner);
-                        sources_.push_back(owner);
-                      }
 
                       for (GraphElem n = m + 1; n < e1; n++)
                         {
@@ -166,21 +161,23 @@ class TriangulateAggrBufferedRMA
             free(send_count);
             free(recv_count);
 
-            MPI_Dist_graph_create_adjacent(comm_, sources_.size(), sources_.data(), 
+            MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
                     MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
                     MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
+            
+            MPI_Barrier(comm_);
             
             // double-checking indegree/outdegree
             int weighted, indegree, outdegree;
             MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
-            assert(indegree == sources_.size());
+            assert(indegree == targets_.size());
             assert(outdegree == targets_.size());
             assert(indegree == outdegree);
             
             pdegree_ = indegree; // for undirected graph, indegree == outdegree
             
             for (int i = 0; i < pdegree_; i++)
-                pindex_.insert({targets_[i], (GraphElem)i});
+                pindex_.insert({targets_[i], i});
 
             sbuf_ctr_ = new GraphElem[pdegree_]();
             scounts_  = new GraphElem[pdegree_]();
@@ -203,6 +200,8 @@ class TriangulateAggrBufferedRMA
               stat_[p] = '0';
               sreq_[p] = MPI_REQUEST_NULL;
             }
+            
+            MPI_Barrier(comm_);
 
             GraphElem disp = 0;
 
@@ -250,7 +249,6 @@ class TriangulateAggrBufferedRMA
             delete []displs_;
 
             targets_.clear();
-            sources_.clear();
             pindex_.clear();
         }
 
@@ -515,8 +513,8 @@ class TriangulateAggrBufferedRMA
         MPI_Request *sreq_;
         
         int rank_, size_;
-        std::unordered_map<GraphElem, GraphElem> pindex_; 
-        std::vector<int> targets_, sources_;
+        std::unordered_map<int, int> pindex_; 
+        std::vector<int> targets_;
         MPI_Comm comm_, gcomm_;
         MPI_Win win_, cwin_;
 };
