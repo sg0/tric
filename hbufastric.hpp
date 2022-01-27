@@ -77,7 +77,22 @@ class TriangulateAggrBufferedHeuristics
             erange_ = new GraphElem[nv*2]();
             
             double t0 = MPI_Wtime();
+            
+            // store edge ranges
+            for (GraphElem i = 0; i < lnv; i++)
+            {
+                GraphElem e0, e1;
+                g_->edge_range(i, e0, e1);
+                
+                if ((e0 + 1) == e1)
+                    continue;
 
+                Edge const& edge_s = g_->get_edge(e0);
+                Edge const& edge_t = g_->get_edge(e1-1);
+                erange_[g_->local_to_global(i)*2] = edge_s.tail_;
+                erange_[g_->local_to_global(i)*2+1] = edge_t.tail_;
+            }
+                
             for (GraphElem i = 0; i < lnv; i++)
             {
                 GraphElem e0, e1, tup[2];
@@ -86,12 +101,6 @@ class TriangulateAggrBufferedHeuristics
                 if ((e0 + 1) == e1)
                     continue;
 
-                // set edge range
-                Edge const& edge_s = g_->get_edge(e0);
-                Edge const& edge_t = g_->get_edge(e1-1);
-                erange_[g_->local_to_global(i)*2] = edge_s.tail_;
-                erange_[g_->local_to_global(i)*2+1] = edge_t.tail_;
-                
                 for (GraphElem m = e0; m < e1-1; m++)
                 {
                     Edge const& edge_m = g_->get_edge(m);
@@ -112,6 +121,14 @@ class TriangulateAggrBufferedHeuristics
                         if (std::find(targets_.begin(), targets_.end(), owner) 
                                 == targets_.end())
                             targets_.push_back(owner);
+
+                        // check validity of edge range
+                        if ((m + 1) < e1)
+                        {
+                            Edge const& edge_n = g_->get_edge(m + 1);
+                            if (!edge_within_range(edge_m.tail_, edge_n.tail_))
+                                break;
+                        }
 
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
@@ -152,8 +169,6 @@ class TriangulateAggrBufferedHeuristics
                     MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
                     MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
             
-            MPI_Barrier(comm_);
-            
             // double-checking indegree/outdegree
             int weighted, indegree, outdegree;
             MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
@@ -181,6 +196,8 @@ class TriangulateAggrBufferedHeuristics
             std::fill(prev_m_, prev_m_ + pdegree_, -1);
             std::fill(stat_, stat_ + pdegree_, '0');
 
+            MPI_Barrier(comm_);
+            
             MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
                     MPI_SUM, comm_);
         }
@@ -409,7 +426,7 @@ class TriangulateAggrBufferedHeuristics
             bool done = false, nbar_active = false, sends_done = false;
             MPI_Request nbar_req = MPI_REQUEST_NULL;
 
-            int *inds = new int[size_];
+            int *inds = new int[pdegree_];
             int over = -1;
 
             while(!done)
@@ -427,7 +444,7 @@ class TriangulateAggrBufferedHeuristics
 
               process_messages();
 
-              MPI_Testsome(size_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
+              MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
 
               if (over != MPI_UNDEFINED)
               {
