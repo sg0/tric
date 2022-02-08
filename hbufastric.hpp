@@ -124,33 +124,22 @@ class TriangulateAggrBufferedHeuristics
           }
         }
         else
-        {         
-          int check = 0;
+        {  
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
             
             // check validity of edge range
             if (!edge_within_range(edge_m.edge_->tail_, edge_n.tail_) || !edge_within_range(edge_n.tail_, edge_m.edge_->tail_))
-            {
-              check += 1;
               break;
-            }
 
-            check += 1;
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
 
-          if (check == 1)
-            edge_m.active_ = false;
-
-          if (check > 1)
-          {
-            if (std::find(targets_.begin(), targets_.end(), owner) 
-                == targets_.end())
-              targets_.push_back(owner);
-          }
+          if (std::find(targets_.begin(), targets_.end(), owner) 
+              == targets_.end())
+            targets_.push_back(owner);
         }
       }
     }
@@ -311,14 +300,18 @@ class TriangulateAggrBufferedHeuristics
 
               sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge.edge_->tail_;
               sbuf_ctr_[pindex_[owner]] += 1;
-              int inrange = 0;
+              bool exit_imm = true;
 
               for (GraphElem n = ((prev_k_[pindex_[owner]] == -1) ? (m + 1) : prev_k_[pindex_[owner]]); n < e1; n++)
               {               
                 Edge const& edge_n = g_->get_edge(n);                                
                 if (!edge_within_range(edge.edge_->tail_, edge_n.tail_) || !edge_within_range(edge_n.tail_, edge.edge_->tail_))
                 {
-                  inrange += 1;
+                  if (exit_imm)
+                  {
+                    sbuf_ctr_[pindex_[owner]] -= 1;
+                    sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = -1;
+                  }
                   break;
                 }
 
@@ -336,22 +329,28 @@ class TriangulateAggrBufferedHeuristics
                   break;
                 }
                                
-                inrange += 1;
+                exit_imm = false;
                 sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge_n.tail_;
                 sbuf_ctr_[pindex_[owner]] += 1;
                 out_nghosts_ -= 1;
                 vcount_[i] -= 1;
               }
+              
+              if (exit_imm)
+              {
+                prev_m_[pindex_[owner]] = m;
+                prev_k_[pindex_[owner]] = -1;
+                edge.active_ = false;
 
+                continue;
+              }
+              
               if (stat_[pindex_[owner]] == '0') 
               {               
                 prev_m_[pindex_[owner]] = m;
                 prev_k_[pindex_[owner]] = -1;
-
                 edge.active_ = false;
-  
-                if (inrange == 1)
-                  sbuf_ctr_[pindex_[owner]] -= 1;
+
 
                 if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
                 {
