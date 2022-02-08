@@ -79,6 +79,7 @@ class TriangulateAggrBufferedHeuristics
     double t0 = MPI_Wtime();
 
     // store edge ranges
+    GraphElem base = g_->get_base(rank_);
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1;
@@ -87,14 +88,16 @@ class TriangulateAggrBufferedHeuristics
       if ((e0 + 1) == e1)
         continue;
 
-      const GraphElem gi = g_->local_to_global(i);
-
       Edge const& edge_s = g_->get_edge(e0);
       Edge const& edge_t = g_->get_edge(e1-1);
 
-      erange_[gi*2] = edge_s.tail_;
-      erange_[gi*2+1] = edge_t.tail_;
+      erange_[(i + base)*2] = edge_s.tail_;
+      erange_[(i + base)*2+1] = edge_t.tail_;
     }
+    
+    MPI_Barrier(comm_);
+    MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
+        MPI_SUM, comm_);
 
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -106,9 +109,9 @@ class TriangulateAggrBufferedHeuristics
 
       for (GraphElem m = e0; m < e1-1; m++)
       {
-        Edge const& edge_m = g_->get_edge(m);
-        const int owner = g_->get_owner(edge_m.tail_);
-        tup[0] = edge_m.tail_;
+        EdgeStat& edge_m = g_->get_edge_stat(m);
+        const int owner = g_->get_owner(edge_m.edge_->tail_);
+        tup[0] = edge_m.edge_->tail_;
 
         if (owner == rank_)
         {
@@ -126,16 +129,23 @@ class TriangulateAggrBufferedHeuristics
               == targets_.end())
             targets_.push_back(owner);
 
+          bool inrange = false;
           for (GraphElem n = m + 1; n < e1; n++)
           {
             // check validity of edge range
             Edge const& edge_n = g_->get_edge(n);
-            if (!edge_within_range(edge_m.tail_, edge_n.tail_))
-              continue;
+            if (!edge_within_range(edge_m.edge_->tail_, edge_n.tail_) || !edge_within_range(edge_n.tail_, edge_m.edge_->tail_))
+              break;
+
+            if (!inrange)
+              inrange = true;
 
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
+
+          if (!inrange)
+            edge_m.active_ = false;
         }
       }
     }
@@ -179,7 +189,7 @@ class TriangulateAggrBufferedHeuristics
 
     pdegree_ = indegree; // for undirected graph, indegree == outdegree
 
-    for (int i = 0; i < targets_.size(); i++)
+    for (int i = 0; i < pdegree_; i++)
       pindex_.insert({targets_[i], (GraphElem)i});
 
     sbuf_     = new GraphElem[pdegree_*bufsize_];
@@ -199,8 +209,14 @@ class TriangulateAggrBufferedHeuristics
 
     MPI_Barrier(comm_);
 
-    MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
-        MPI_SUM, comm_);
+#if defined(DEBUG_PRINTF)
+    if (rank_ == 0)
+    {
+      std::cout << "Edge range per vertex: " << std::endl;
+      for (int i = 0, j = 0; i < nv*2; i+=2, j++)
+        std::cout << j << ": " << erange_[i] << ", " << erange_[i+1] << std::endl;
+    }
+#endif
   }
 
     ~TriangulateAggrBufferedHeuristics() {}
@@ -268,8 +284,8 @@ class TriangulateAggrBufferedHeuristics
           EdgeStat& edge = g_->get_edge_stat(m);
           const int owner = g_->get_owner(edge.edge_->tail_);
 
-          if (owner != rank_ && edge.active_)
-          { 
+          if ((owner != rank_) && edge.active_)
+          {   
             if (stat_[pindex_[owner]] == '1') 
               continue;
 
@@ -290,10 +306,17 @@ class TriangulateAggrBufferedHeuristics
 
               sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge.edge_->tail_;
               sbuf_ctr_[pindex_[owner]] += 1;
-              GraphElem icount = 0;
+              int inrange = 0;
 
               for (GraphElem n = ((prev_k_[pindex_[owner]] == -1) ? (m + 1) : prev_k_[pindex_[owner]]); n < e1; n++)
-              {
+              {               
+                Edge const& edge_n = g_->get_edge(n);                                
+                if (!edge_within_range(edge.edge_->tail_, edge_n.tail_) || !edge_within_range(edge_n.tail_, edge.edge_->tail_))
+                {
+                  inrange++;
+                  break;
+                }
+
                 if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
                 {
                   prev_m_[pindex_[owner]] = m;
@@ -307,27 +330,22 @@ class TriangulateAggrBufferedHeuristics
 
                   break;
                 }
-                
-                Edge const& edge_n = g_->get_edge(n);                                
-                if (!edge_within_range(edge.edge_->tail_, edge_n.tail_))
-                  continue;
-
+                               
                 sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge_n.tail_;
                 sbuf_ctr_[pindex_[owner]] += 1;
                 out_nghosts_ -= 1;
                 vcount_[i] -= 1;
-                icount += 1;
               }
 
               if (stat_[pindex_[owner]] == '0') 
-              {
-                if (icount == 0)
-                  sbuf_ctr_[pindex_[owner]] -= 1;
-
+              {               
                 prev_m_[pindex_[owner]] = m;
                 prev_k_[pindex_[owner]] = -1;
 
                 edge.active_ = false;
+  
+                if (inrange == 1)
+                  sbuf_ctr_[pindex_[owner]] -= 1;
 
                 if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
                 {
