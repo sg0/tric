@@ -124,28 +124,33 @@ class TriangulateAggrBufferedHeuristics
           }
         }
         else
-        {
-          if (std::find(targets_.begin(), targets_.end(), owner) 
-              == targets_.end())
-            targets_.push_back(owner);
-
-          bool inrange = false;
+        {         
+          int check = 0;
           for (GraphElem n = m + 1; n < e1; n++)
           {
-            // check validity of edge range
             Edge const& edge_n = g_->get_edge(n);
+            
+            // check validity of edge range
             if (!edge_within_range(edge_m.edge_->tail_, edge_n.tail_) || !edge_within_range(edge_n.tail_, edge_m.edge_->tail_))
+            {
+              check += 1;
               break;
+            }
 
-            if (!inrange)
-              inrange = true;
-
+            check += 1;
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
 
-          if (!inrange)
+          if (check == 1)
             edge_m.active_ = false;
+
+          if (check > 1)
+          {
+            if (std::find(targets_.begin(), targets_.end(), owner) 
+                == targets_.end())
+              targets_.push_back(owner);
+          }
         }
       }
     }
@@ -212,7 +217,7 @@ class TriangulateAggrBufferedHeuristics
 #if defined(DEBUG_PRINTF)
     if (rank_ == 0)
     {
-      std::cout << "Edge range per vertex: " << std::endl;
+      std::cout << "Edge range per vertex (#ID: <range>): " << std::endl;
       for (int i = 0, j = 0; i < nv*2; i+=2, j++)
         std::cout << j << ": " << erange_[i] << ", " << erange_[i+1] << std::endl;
     }
@@ -313,7 +318,7 @@ class TriangulateAggrBufferedHeuristics
                 Edge const& edge_n = g_->get_edge(n);                                
                 if (!edge_within_range(edge.edge_->tail_, edge_n.tail_) || !edge_within_range(edge_n.tail_, edge.edge_->tail_))
                 {
-                  inrange++;
+                  inrange += 1;
                   break;
                 }
 
@@ -331,6 +336,7 @@ class TriangulateAggrBufferedHeuristics
                   break;
                 }
                                
+                inrange += 1;
                 sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge_n.tail_;
                 sbuf_ctr_[pindex_[owner]] += 1;
                 out_nghosts_ -= 1;
