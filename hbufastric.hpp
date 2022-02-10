@@ -193,7 +193,7 @@ class TriangulateAggrBufferedHeuristics
     pdegree_ = indegree; // for undirected graph, indegree == outdegree
 
     for (int i = 0; i < pdegree_; i++)
-      pindex_.insert({targets_[i], (GraphElem)i});
+      pindex_.insert({targets_[i], i});
 
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sbuf_ctr_ = new GraphElem[pdegree_]();
@@ -260,8 +260,8 @@ class TriangulateAggrBufferedHeuristics
 
     void nbsend()
     {
-      for (GraphElem p = 0; p < pdegree_; p++)
-          nbsend(targets_[p]);
+      for (int const& p : targets_)
+        nbsend(p);
     }
 
     inline void lookup_edges()
@@ -551,7 +551,7 @@ class TriangulateAggrBufferedHeuristics
     std::vector<int> targets_;
 
     int rank_, size_;
-    std::unordered_map<GraphElem, GraphElem> pindex_; 
+    std::unordered_map<int, int> pindex_; 
     MPI_Comm comm_, gcomm_;
 };
 #endif
