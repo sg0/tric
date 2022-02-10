@@ -96,6 +96,7 @@ class TriangulateAggrBufferedHeuristics
     }
     
     MPI_Barrier(comm_);
+    
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
@@ -118,6 +119,13 @@ class TriangulateAggrBufferedHeuristics
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
+            
+            // check validity of edge range
+            //if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+            //  break;
+            //if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_))
+            //  continue;
+
             tup[1] = edge_n.tail_;
             if (check_edgelist(tup))
               ntriangles_ += 1;
@@ -125,21 +133,22 @@ class TriangulateAggrBufferedHeuristics
         }
         else
         {  
+          if (std::find(targets_.begin(), targets_.end(), owner) 
+              == targets_.end())
+            targets_.push_back(owner);
+
           for (GraphElem n = m + 1; n < e1; n++)
           {
-            Edge const& edge_n = g_->get_edge(n);
+            //Edge const& edge_n = g_->get_edge(n);
             
-            // check validity of edge range
-            if (!edge_within_range(edge_m.edge_->tail_, edge_n.tail_) || !edge_within_range(edge_n.tail_, edge_m.edge_->tail_))
-              break;
+            //if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+            //  break;
+            //if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_))
+            //  continue;
 
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
-
-          if (std::find(targets_.begin(), targets_.end(), owner) 
-              == targets_.end())
-            targets_.push_back(owner);
         }
       }
     }
@@ -245,18 +254,14 @@ class TriangulateAggrBufferedHeuristics
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
-            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+            MPI_GRAPH_TYPE, owner, TAG_DATA, gcomm_, &sreq_[pindex_[owner]]);
       }
     }
 
-    // create a stat to denote end
     void nbsend()
     {
-      for (GraphElem p = 0; p < size_; p++)
-      {
-        if (p != rank_)
-          nbsend(p);
-      }
+      for (GraphElem p = 0; p < pdegree_; p++)
+          nbsend(targets_[p]);
     }
 
     inline void lookup_edges()
@@ -277,93 +282,79 @@ class TriangulateAggrBufferedHeuristics
         {
           EdgeStat& edge = g_->get_edge_stat(m);
           const int owner = g_->get_owner(edge.edge_->tail_);
+          const GraphElem pidx = pindex_[owner];
 
-          if ((owner != rank_) && edge.active_)
+          if (owner != rank_ && edge.active_)
           {   
-            if (stat_[pindex_[owner]] == '1') 
+            if (stat_[pidx] == '1') 
               continue;
 
-            if (m >= prev_m_[pindex_[owner]])
+            if (m >= prev_m_[pidx])
             {
-              const GraphElem disp = pindex_[owner]*bufsize_;
+              const GraphElem disp = pidx*bufsize_;
 
-              if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
+              if (sbuf_ctr_[pidx] == (bufsize_-1))
               {
-                prev_m_[pindex_[owner]] = m;
-                prev_k_[pindex_[owner]] = -1;
-                stat_[pindex_[owner]] = '1'; // messages in-flight
+                prev_m_[pidx] = m;
+                prev_k_[pidx] = -1;
+                stat_[pidx] = '1'; // messages in-flight
 
                 nbsend(owner);
 
                 continue;
               }
 
-              sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge.edge_->tail_;
-              sbuf_ctr_[pindex_[owner]] += 1;
-              bool exit_imm = true;
+              sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
+              sbuf_ctr_[pidx] += 1;
 
-              for (GraphElem n = ((prev_k_[pindex_[owner]] == -1) ? (m + 1) : prev_k_[pindex_[owner]]); n < e1; n++)
-              {               
+              for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+              {  
                 Edge const& edge_n = g_->get_edge(n);                                
-                if (!edge_within_range(edge.edge_->tail_, edge_n.tail_) || !edge_within_range(edge_n.tail_, edge.edge_->tail_))
-                {
-                  if (exit_imm)
-                  {
-                    sbuf_ctr_[pindex_[owner]] -= 1;
-                    sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = -1;
-                  }
-                  break;
-                }
 
-                if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
+                //if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+                //  break;
+                //if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+                //  continue;
+ 
+                if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
-                  prev_m_[pindex_[owner]] = m;
-                  prev_k_[pindex_[owner]] = n;
+                  prev_m_[pidx] = m;
+                  prev_k_[pidx] = n;
 
-                  sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = -1; // demarcate vertex boundary
-                  sbuf_ctr_[pindex_[owner]] += 1;
-                  stat_[pindex_[owner]] = '1'; 
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
+                  sbuf_ctr_[pidx] += 1;
+                  stat_[pidx] = '1'; 
 
                   nbsend(owner);
 
                   break;
                 }
-                               
-                exit_imm = false;
-                sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = edge_n.tail_;
-                sbuf_ctr_[pindex_[owner]] += 1;
+                              
+                sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
+                sbuf_ctr_[pidx] += 1;
                 out_nghosts_ -= 1;
                 vcount_[i] -= 1;
               }
               
-              if (exit_imm)
-              {
-                prev_m_[pindex_[owner]] = m;
-                prev_k_[pindex_[owner]] = -1;
-                edge.active_ = false;
-
-                continue;
-              }
-              
-              if (stat_[pindex_[owner]] == '0') 
+              if (stat_[pidx] == '0') 
               {               
-                prev_m_[pindex_[owner]] = m;
-                prev_k_[pindex_[owner]] = -1;
+                prev_m_[pidx] = m;
+                prev_k_[pidx] = -1;
+                
                 edge.active_ = false;
 
-
-                if (sbuf_ctr_[pindex_[owner]] == (bufsize_-1))
+                if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
-                  sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = -1; 
-                  sbuf_ctr_[pindex_[owner]] += 1;
-                  stat_[pindex_[owner]] = '1';
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_ctr_[pidx] += 1;
+                  stat_[pidx] = '1';
 
                   nbsend(owner);
                 }
                 else
                 {
-                  sbuf_[disp+sbuf_ctr_[pindex_[owner]]] = -1; 
-                  sbuf_ctr_[pindex_[owner]] += 1;
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_ctr_[pidx] += 1;
                 }
               }
             }
@@ -387,10 +378,24 @@ class TriangulateAggrBufferedHeuristics
       }
       return false;
     }
-
-    inline bool edge_within_range(GraphElem x, GraphElem y)
+    
+    inline bool edge_between_range(GraphElem x, GraphElem y)
     {
       if ((y >= erange_[x*2]) && (y <= erange_[x*2+1]))
+        return true;
+      return false;
+    }
+     
+    inline bool edge_above_min(GraphElem x, GraphElem y)
+    {
+      if (y >= erange_[x*2])
+        return true;
+      return false;
+    }
+
+    inline bool edge_within_max(GraphElem x, GraphElem y)
+    {
+      if (y <= erange_[x*2+1])
         return true;
       return false;
     }
@@ -399,25 +404,32 @@ class TriangulateAggrBufferedHeuristics
     {
       MPI_Status status;
       int flag = -1;
-      GraphElem tup[2] = {-1,-1}, source = -1, prev = 0;
+      GraphElem tup[2] = {-1,-1}, source = -1, k = 0, prev = 0;
       int count = 0;
 
-      MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, comm_, &flag, &status);
+      MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, gcomm_, &flag, &status);
 
       if (flag)
       { 
         source = status.MPI_SOURCE;
         MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
         MPI_Recv(rbuf_, count, MPI_GRAPH_TYPE, source, 
-            TAG_DATA, comm_, MPI_STATUS_IGNORE);            
+            TAG_DATA, gcomm_, MPI_STATUS_IGNORE);            
       }
       else
         return;
-
-      for (GraphElem k = 0; k < count;)
+     
+      while(1)
       {
+        if (k == count)
+          break;
+
         if (rbuf_[k] == -1)
+        {
+          k += 1;
+          prev = k;
           continue;
+        }
 
         tup[0] = rbuf_[k];
         GraphElem curr_count = 0;
@@ -434,7 +446,7 @@ class TriangulateAggrBufferedHeuristics
 
           if (check_edgelist(tup))
             rinfo_[pindex_[source]] += 1; // EDGE_VALID_TAG 
-
+          
           in_nghosts_ -= 1;
         }
 
@@ -445,13 +457,22 @@ class TriangulateAggrBufferedHeuristics
 
     inline GraphElem count()
     {
-      bool done = false, nbar_active = false, sends_done = false;
+#if defined(USE_ALLREDUCE_FOR_EXIT)
+      GraphElem count;
+#else      
+      bool done = false, nbar_active = false; 
       MPI_Request nbar_req = MPI_REQUEST_NULL;
+#endif
 
-      int *inds = new int[pdegree_];
+      bool sends_done = false;
+      int *inds = new int[pdegree_]();
       int over = -1;
 
+#if defined(USE_ALLREDUCE_FOR_EXIT)
+      while(1)
+#else
       while(!done)
+#endif
       {  
         if (out_nghosts_ == 0)
         {
@@ -476,7 +497,13 @@ class TriangulateAggrBufferedHeuristics
             stat_[inds[i]] = '0';
           }
         }
-        
+
+#if defined(USE_ALLREDUCE_FOR_EXIT)
+        count = in_nghosts_;
+        MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
+        if (count == 0)
+          break;
+#else       
         if (nbar_active)
         {
           int test_nbar = -1;
@@ -487,11 +514,11 @@ class TriangulateAggrBufferedHeuristics
         {
           if (in_nghosts_ == 0)
           {
-            MPI_Ibarrier(comm_, &nbar_req);
+            MPI_Ibarrier(gcomm_, &nbar_req);
             nbar_active = true;
           }
         }
-
+#endif
 #if defined(DEBUG_PRINTF)
         std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
 #endif            
