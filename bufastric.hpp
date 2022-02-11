@@ -173,7 +173,6 @@ class TriangulateAggrBuffered
                           
                           if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
                             break;
-
 #if defined(USE_OPENMP)
                           #pragma omp atomic update
 #endif
