@@ -61,7 +61,8 @@ class TriangulateAggrBuffered
             g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr),
             sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), vcount_(nullptr), 
             ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), 
-            prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), bufsize_(bufsize)
+            prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), bufsize_(bufsize),
+            erange_(nullptr)
         {
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
@@ -92,8 +93,33 @@ class TriangulateAggrBuffered
             std::memset(recv_count, 0, sizeof(GraphElem)*size_);
             
             const GraphElem lnv = g_->get_lnv();
+            const GraphElem nv = g_->get_nv();
             vcount_ = new GraphElem[lnv];
             std::fill(vcount_, vcount_ + lnv, 0);
+
+            erange_ = new GraphElem[nv*2];
+            std::fill(erange_, erange_ + nv, 0);
+            // store edge ranges
+            GraphElem base = g_->get_base(rank_);
+            for (GraphElem i = 0; i < lnv; i++)
+            {
+              GraphElem e0, e1;
+              g_->edge_range(i, e0, e1);
+
+              if ((e0 + 1) == e1)
+                continue;
+
+              Edge const& edge_s = g_->get_edge(e0);
+              Edge const& edge_t = g_->get_edge(e1-1);
+
+              erange_[(i + base)*2] = edge_s.tail_;
+              erange_[(i + base)*2+1] = edge_t.tail_;
+            }
+
+            MPI_Barrier(comm_);
+
+            MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
+                MPI_SUM, comm_);
 
             std::vector<GraphElem> targets;
 
@@ -115,14 +141,15 @@ class TriangulateAggrBuffered
                 
                 for (GraphElem m = e0; m < e1-1; m++)
                 {
-                    Edge const& edge_m = g_->get_edge(m);
-                    const int owner = g_->get_owner(edge_m.tail_);
-                    tup[0] = edge_m.tail_;
+                    EdgeStat const& edge_m = g_->get_edge_stat(m);
+                    const int owner = g_->get_owner(edge_m.edge_->tail_);
+                    tup[0] = edge_m.edge_->tail_;
                     if (owner == rank_)
                     {
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
-                            Edge const& edge_n = g_->get_edge(n);
+                          Edge const& edge_n = g_->get_edge(n);
+                          
                             tup[1] = edge_n.tail_;
                             if (check_edgelist(tup))
                             {
@@ -142,6 +169,11 @@ class TriangulateAggrBuffered
 
                         for (GraphElem n = m + 1; n < e1; n++)
                         {
+                          Edge const& edge_n = g_->get_edge(n);
+                          
+                          if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+                            break;
+
 #if defined(USE_OPENMP)
                           #pragma omp atomic update
 #endif
@@ -205,6 +237,7 @@ class TriangulateAggrBuffered
             delete []prev_m_;
             delete []stat_;
             delete []vcount_;
+            delete []erange_;
 
             pindex_.clear();
         }
@@ -277,6 +310,11 @@ class TriangulateAggrBuffered
 
                   for (GraphElem n = ((prev_k_[owner] == -1) ? (m + 1) : prev_k_[owner]); n < e1; n++)
                   {
+                    Edge const& edge_n = g_->get_edge(n);
+
+                    if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+                      break;
+
                     if (sbuf_ctr_[owner] == (bufsize_-1))
                     {
                       prev_m_[owner] = m;
@@ -291,7 +329,6 @@ class TriangulateAggrBuffered
                       break;
                     }
 
-                    Edge const& edge_n = g_->get_edge(n);
                     sbuf_[disp+sbuf_ctr_[owner]] = edge_n.tail_;
                     sbuf_ctr_[owner] += 1;
                     out_nghosts_ -= 1;
@@ -332,13 +369,34 @@ class TriangulateAggrBuffered
             g_->edge_range(lv, e0, e1);
             for (GraphElem e = e0; e < e1; e++)
             {
-                Edge const& edge = g_->get_edge(e);
-                if (tup[1] == edge.tail_)
-                    return true;
-                if (edge.tail_ > tup[1]) 
-                    break;
+              Edge const& edge = g_->get_edge(e);
+              if (tup[1] == edge.tail_)
+                return true;
+              if (edge.tail_ > tup[1]) 
+                break;
             }
             return false;
+        }
+
+        inline bool edge_above_min(GraphElem x, GraphElem y)
+        {
+          if (y >= erange_[x*2])
+            return true;
+          return false;
+        }
+
+        inline bool edge_within_max(GraphElem x, GraphElem y)
+        {
+          if (y <= erange_[x*2+1])
+            return true;
+          return false;
+        }
+    
+        inline bool edge_between_range(GraphElem x, GraphElem y)
+        {
+          if ((y >= erange_[x*2]) && (y <= erange_[x*2+1]))
+            return true;
+          return false;
         }
 
         inline void process_messages()
@@ -461,7 +519,7 @@ class TriangulateAggrBuffered
         
         GraphElem ntriangles_;
         GraphElem bufsize_, nghosts_, out_nghosts_, in_nghosts_;
-        GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *rinfo_, *srinfo_, *vcount_;
+        GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *rinfo_, *srinfo_, *vcount_, *erange_;
         MPI_Request *sreq_;
         char *stat_;
         
