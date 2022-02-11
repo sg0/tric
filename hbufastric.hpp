@@ -120,11 +120,8 @@ class TriangulateAggrBufferedHeuristics
           {
             Edge const& edge_n = g_->get_edge(n);
             
-            // check validity of edge range
-            //if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
-            //  break;
-            //if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_))
-            //  continue;
+            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+              break;
 
             tup[1] = edge_n.tail_;
             if (check_edgelist(tup))
@@ -139,12 +136,10 @@ class TriangulateAggrBufferedHeuristics
 
           for (GraphElem n = m + 1; n < e1; n++)
           {
-            //Edge const& edge_n = g_->get_edge(n);
-            
-            //if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
-            //  break;
-            //if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_))
-            //  continue;
+            Edge const& edge_n = g_->get_edge(n);
+
+            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+              break;
 
             send_count[owner] += 1;
             vcount_[i] += 1;
@@ -311,11 +306,9 @@ class TriangulateAggrBufferedHeuristics
               {  
                 Edge const& edge_n = g_->get_edge(n);                                
 
-                //if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
-                //  break;
-                //if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
-                //  continue;
- 
+                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+                  break;
+
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
                   prev_m_[pidx] = m;
