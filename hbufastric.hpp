@@ -59,9 +59,9 @@ class TriangulateAggrBufferedHeuristics
 
     TriangulateAggrBufferedHeuristics(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
-      gcomm_(MPI_COMM_NULL), sreq_(nullptr), rinfo_(nullptr), srinfo_(nullptr), erange_(nullptr), 
-      vcount_(nullptr), ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), 
-      prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), bufsize_(bufsize)
+      gcomm_(MPI_COMM_NULL), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), 
+      ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), 
+      prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(bufsize)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -75,6 +75,7 @@ class TriangulateAggrBufferedHeuristics
 
     vcount_ = new GraphElem[lnv]();
     erange_ = new GraphElem[nv*2]();
+    rbuf_   = new GraphElem[bufsize_];
 
     double t0 = MPI_Wtime();
 
@@ -119,10 +120,6 @@ class TriangulateAggrBufferedHeuristics
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
-            
-            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
-              break;
-
             tup[1] = edge_n.tail_;
             if (check_edgelist(tup))
               ntriangles_ += 1;
@@ -132,7 +129,7 @@ class TriangulateAggrBufferedHeuristics
         {  
           if (std::find(targets_.begin(), targets_.end(), owner) 
               == targets_.end())
-            targets_.push_back(owner);
+            targets_.push_back(static_cast<GraphElem>(owner));
 
           for (GraphElem n = m + 1; n < e1; n++)
           {
@@ -174,8 +171,8 @@ class TriangulateAggrBufferedHeuristics
     free(send_count);
     free(recv_count);
 
-    MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
-        MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
+    MPI_Dist_graph_create_adjacent(comm_, targets_.size(), reinterpret_cast<int*>(targets_.data()), 
+        MPI_UNWEIGHTED, targets_.size(), reinterpret_cast<int*>(targets_.data()), MPI_UNWEIGHTED, 
         MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
 
     // double-checking indegree/outdegree
@@ -188,17 +185,14 @@ class TriangulateAggrBufferedHeuristics
     pdegree_ = indegree; // for undirected graph, indegree == outdegree
 
     for (int i = 0; i < pdegree_; i++)
-      pindex_.insert({targets_[i], i});
+      pindex_.insert({targets_[i], static_cast<GraphElem>(i)});
 
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sbuf_ctr_ = new GraphElem[pdegree_]();
-    rinfo_    = new GraphElem[pdegree_]();
-    srinfo_   = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
     stat_     = new char[pdegree_];
     sreq_     = new MPI_Request[pdegree_];
-    rbuf_     = new GraphElem[bufsize_]();
 
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
@@ -226,8 +220,6 @@ class TriangulateAggrBufferedHeuristics
       delete []sbuf_;
       delete []rbuf_;
       delete []sbuf_ctr_;
-      delete []srinfo_;
-      delete []rinfo_;
       delete []sreq_;
       delete []prev_k_;
       delete []prev_m_;
@@ -249,7 +241,7 @@ class TriangulateAggrBufferedHeuristics
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
-            MPI_GRAPH_TYPE, owner, TAG_DATA, gcomm_, &sreq_[pindex_[owner]]);
+            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
       }
     }
 
@@ -397,21 +389,21 @@ class TriangulateAggrBufferedHeuristics
     {
       MPI_Status status;
       int flag = -1;
-      GraphElem tup[2] = {-1,-1}, source = -1, k = 0, prev = 0;
-      int count = 0;
+      GraphElem tup[2] = {-1,-1}, k = 0, prev = 0;
+      int count = 0, source = -1;
 
-      MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, gcomm_, &flag, &status);
+      MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, comm_, &flag, &status);
 
       if (flag)
       { 
         source = status.MPI_SOURCE;
         MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
         MPI_Recv(rbuf_, count, MPI_GRAPH_TYPE, source, 
-            TAG_DATA, gcomm_, MPI_STATUS_IGNORE);            
+            TAG_DATA, comm_, MPI_STATUS_IGNORE);       
       }
       else
         return;
-     
+
       while(1)
       {
         if (k == count)
@@ -438,8 +430,8 @@ class TriangulateAggrBufferedHeuristics
           tup[1] = rbuf_[m];
 
           if (check_edgelist(tup))
-            rinfo_[pindex_[source]] += 1; // EDGE_VALID_TAG 
-          
+            ntriangles_ += 1;
+
           in_nghosts_ -= 1;
         }
 
@@ -458,7 +450,7 @@ class TriangulateAggrBufferedHeuristics
 #endif
 
       bool sends_done = false;
-      int *inds = new int[pdegree_]();
+      int *inds = new int[pdegree_];
       int over = -1;
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
@@ -486,8 +478,9 @@ class TriangulateAggrBufferedHeuristics
         {
           for (int i = 0; i < over; i++)
           {
-            sbuf_ctr_[inds[i]] = 0;
-            stat_[inds[i]] = '0';
+            GraphElem idx = static_cast<GraphElem>(inds[i]);
+            sbuf_ctr_[idx] = 0;
+            stat_[idx] = '0';
           }
         }
 
@@ -507,7 +500,7 @@ class TriangulateAggrBufferedHeuristics
         {
           if (in_nghosts_ == 0)
           {
-            MPI_Ibarrier(gcomm_, &nbar_req);
+            MPI_Ibarrier(comm_, &nbar_req);
             nbar_active = true;
           }
         }
@@ -516,12 +509,6 @@ class TriangulateAggrBufferedHeuristics
         std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
 #endif            
       }
-
-      MPI_Neighbor_alltoall(rinfo_, 1, MPI_GRAPH_TYPE, srinfo_, 
-          1, MPI_GRAPH_TYPE, gcomm_);
-
-      for (int p = 0; p < pdegree_; p++)
-        ntriangles_ += srinfo_[p];
 
       GraphElem ttc = 0, ltc = ntriangles_;
       MPI_Barrier(comm_);
@@ -537,14 +524,14 @@ class TriangulateAggrBufferedHeuristics
 
     GraphElem ntriangles_;
     GraphElem bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
-    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *rinfo_, *srinfo_, *vcount_, *erange_;
+    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_;
     char *stat_;
 
-    std::vector<int> targets_;
+    std::vector<GraphElem> targets_;
 
     int rank_, size_;
-    std::unordered_map<int, int> pindex_; 
+    std::unordered_map<GraphElem, GraphElem> pindex_; 
     MPI_Comm comm_, gcomm_;
 };
 #endif

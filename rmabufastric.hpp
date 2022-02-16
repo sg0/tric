@@ -54,10 +54,9 @@ class TriangulateAggrBufferedRMA
 
         TriangulateAggrBufferedRMA(Graph* g, const GraphElem bufsize): 
             g_(g), sbuf_ctr_(nullptr), wbuf_(nullptr), sbuf_(nullptr), win_(MPI_WIN_NULL), sreq_(nullptr), 
-            pdegree_(-1), displs_(nullptr), scounts_(nullptr), rcounts_(nullptr), rinfo_(nullptr), 
-            srinfo_(nullptr), vcount_(nullptr), gcomm_(MPI_COMM_NULL), ntriangles_(0), nghosts_(0), 
-            out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), 
-            targets_(0), bufsize_(bufsize)
+            pdegree_(-1), displs_(nullptr), scounts_(nullptr), rcounts_(nullptr),  vcount_(nullptr), 
+            gcomm_(MPI_COMM_NULL), ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), 
+            prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(bufsize)
         {
             comm_ = g_->get_comm();
             MPI_Comm_size(comm_, &size_);
@@ -161,8 +160,8 @@ class TriangulateAggrBufferedRMA
             free(send_count);
             free(recv_count);
 
-            MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
-                    MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
+            MPI_Dist_graph_create_adjacent(comm_, targets_.size(), (const int*)targets_.data(), 
+                    MPI_UNWEIGHTED, targets_.size(), (const int*)targets_.data(), MPI_UNWEIGHTED, 
                     MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
             
             MPI_Barrier(comm_);
@@ -177,13 +176,11 @@ class TriangulateAggrBufferedRMA
             pdegree_ = indegree; // for undirected graph, indegree == outdegree
             
             for (int i = 0; i < pdegree_; i++)
-                pindex_.insert({targets_[i], i});
+                pindex_.insert({targets_[i], (GraphElem)i});
 
             sbuf_ctr_ = new GraphElem[pdegree_]();
             scounts_  = new GraphElem[pdegree_]();
             rcounts_  = new GraphElem[pdegree_]();
-            srinfo_   = new GraphElem[pdegree_]();
-            rinfo_    = new GraphElem[pdegree_]();
             prev_k_   = new GraphElem[pdegree_];
             prev_m_   = new GraphElem[pdegree_];
             stat_     = new char[pdegree_];
@@ -234,8 +231,6 @@ class TriangulateAggrBufferedRMA
             delete []sbuf_ctr_;
             delete []scounts_;
             delete []rcounts_;
-            delete []srinfo_;
-            delete []rinfo_;
             delete []prev_k_;
             delete []prev_m_;
             delete []stat_;
@@ -410,7 +405,7 @@ class TriangulateAggrBufferedRMA
                             tup[1] = wbuf_[p*bufsize_+m];
 
                             if (check_edgelist(tup))
-                                rinfo_[p] += 1; // valid edge 
+                                ntriangles_ += 1; // valid edge 
 
                             in_nghosts_ -= 1;
                         }
@@ -480,12 +475,6 @@ class TriangulateAggrBufferedRMA
 #endif            
             }
             
-            MPI_Neighbor_alltoall(rinfo_, 1, MPI_GRAPH_TYPE, srinfo_, 
-                    1, MPI_GRAPH_TYPE, gcomm_);
-            
-            for (int p = 0; p < pdegree_; p++)
-                ntriangles_ += srinfo_[p];
-            
             GraphElem ttc = 0, ltc = ntriangles_;
             MPI_Barrier(comm_);
             MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
@@ -498,14 +487,14 @@ class TriangulateAggrBufferedRMA
         
         GraphElem ntriangles_, pdegree_, bufsize_, nghosts_, out_nghosts_, in_nghosts_;
         GraphElem *sbuf_, *wbuf_, *prev_k_, *prev_m_, *displs_, *sbuf_ctr_, 
-                  *scounts_, *rcounts_, *rinfo_, *srinfo_, *vcount_;
+                  *scounts_, *rcounts_, *vcount_;
         char *stat_;
         
         MPI_Request *sreq_;
         
         int rank_, size_;
-        std::unordered_map<int, int> pindex_; 
-        std::vector<int> targets_;
+        std::unordered_map<GraphElem, GraphElem> pindex_; 
+        std::vector<GraphElem> targets_;
         MPI_Comm comm_, gcomm_;
         MPI_Win win_, cwin_;
 };
