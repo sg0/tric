@@ -59,9 +59,9 @@ class TriangulateAggrBufferedHeuristics
 
     TriangulateAggrBufferedHeuristics(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
-      gcomm_(MPI_COMM_NULL), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), 
-      ntriangles_(0), nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), 
-      prev_m_(nullptr), prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(bufsize)
+      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
+      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
+      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(bufsize)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -121,6 +121,7 @@ class TriangulateAggrBufferedHeuristics
           {
             Edge const& edge_n = g_->get_edge(n);
             tup[1] = edge_n.tail_;
+            
             if (check_edgelist(tup))
               ntriangles_ += 1;
           }
@@ -171,18 +172,7 @@ class TriangulateAggrBufferedHeuristics
     free(send_count);
     free(recv_count);
 
-    MPI_Dist_graph_create_adjacent(comm_, targets_.size(), reinterpret_cast<int*>(targets_.data()), 
-        MPI_UNWEIGHTED, targets_.size(), reinterpret_cast<int*>(targets_.data()), MPI_UNWEIGHTED, 
-        MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
-
-    // double-checking indegree/outdegree
-    int weighted, indegree, outdegree;
-    MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
-    assert(indegree == targets_.size());
-    assert(outdegree == targets_.size());
-    assert(indegree == outdegree);
-
-    pdegree_ = indegree; // for undirected graph, indegree == outdegree
+    pdegree_ = targets_.size(); 
 
     for (int i = 0; i < pdegree_; i++)
       pindex_.insert({targets_[i], static_cast<GraphElem>(i)});
@@ -215,8 +205,6 @@ class TriangulateAggrBufferedHeuristics
 
     void clear()
     {
-      MPI_Comm_free(&gcomm_);
-
       delete []sbuf_;
       delete []rbuf_;
       delete []sbuf_ctr_;
@@ -364,21 +352,21 @@ class TriangulateAggrBufferedHeuristics
       return false;
     }
     
-    inline bool edge_between_range(GraphElem x, GraphElem y)
+    inline bool edge_between_range(GraphElem x, GraphElem y) const
     {
       if ((y >= erange_[x*2]) && (y <= erange_[x*2+1]))
         return true;
       return false;
     }
      
-    inline bool edge_above_min(GraphElem x, GraphElem y)
+    inline bool edge_above_min(GraphElem x, GraphElem y) const
     {
       if (y >= erange_[x*2])
         return true;
       return false;
     }
 
-    inline bool edge_within_max(GraphElem x, GraphElem y)
+    inline bool edge_within_max(GraphElem x, GraphElem y) const
     {
       if (y <= erange_[x*2+1])
         return true;
@@ -532,6 +520,6 @@ class TriangulateAggrBufferedHeuristics
 
     int rank_, size_;
     std::unordered_map<GraphElem, GraphElem> pindex_; 
-    MPI_Comm comm_, gcomm_;
+    MPI_Comm comm_;
 };
 #endif
