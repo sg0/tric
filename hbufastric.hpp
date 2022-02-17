@@ -61,7 +61,7 @@ class TriangulateAggrBufferedHeuristics
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(bufsize)
+      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(-1)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -75,7 +75,6 @@ class TriangulateAggrBufferedHeuristics
 
     vcount_ = new GraphElem[lnv]();
     erange_ = new GraphElem[nv*2]();
-    rbuf_   = new GraphElem[bufsize_];
 
     double t0 = MPI_Wtime();
 
@@ -171,6 +170,11 @@ class TriangulateAggrBufferedHeuristics
 
     nghosts_ = out_nghosts_ + in_nghosts_;
 
+    //TODO FIXME don't hardcode!
+    // adjust bufsize
+    bufsize_ = (nghosts_ < ((bufsize <= 2) ? 5 : bufsize) ? nghosts_ : bufsize);
+    MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+
     free(send_count);
     free(recv_count);
 
@@ -179,6 +183,7 @@ class TriangulateAggrBufferedHeuristics
     for (int i = 0; i < pdegree_; i++)
       pindex_.insert({targets_[i], static_cast<GraphElem>(i)});
 
+    rbuf_     = new GraphElem[bufsize_];
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
