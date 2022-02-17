@@ -172,7 +172,11 @@ class TriangulateAggrBufferedHeuristics
 
     //TODO FIXME don't hardcode!
     // adjust bufsize
-    bufsize_ = (nghosts_ < ((bufsize <= 2) ? 5 : bufsize) ? nghosts_ : bufsize);
+    if (nghosts_ <= 2)
+      bufsize_ = 5;
+    else
+      bufsize_ = ((nghosts_ < bufsize) ? nghosts_ : bufsize);
+    
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
     free(send_count);
