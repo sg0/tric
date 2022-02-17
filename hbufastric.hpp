@@ -136,9 +136,9 @@ class TriangulateAggrBufferedHeuristics
           {
             Edge const& edge_n = g_->get_edge(n);
                 
-            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_) && !edge_within_max(edge_n.tail_, edge_m.edge_->tail_))
               break;
-            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_))
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) && !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
               continue;
 
             send_count[owner] += 1;
@@ -288,9 +288,9 @@ class TriangulateAggrBufferedHeuristics
               {  
                 Edge const& edge_n = g_->get_edge(n);                                
                 
-                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_) && !edge_within_max(edge_n.tail_, edge.edge_->tail_))
                   break;
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) && !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
