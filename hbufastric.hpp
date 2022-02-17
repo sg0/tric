@@ -135,9 +135,11 @@ class TriangulateAggrBufferedHeuristics
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
-
+                
             if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
               break;
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_))
+              continue;
 
             send_count[owner] += 1;
             vcount_[i] += 1;
@@ -285,9 +287,11 @@ class TriangulateAggrBufferedHeuristics
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
               {  
                 Edge const& edge_n = g_->get_edge(n);                                
-
+                
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+                  continue;
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
