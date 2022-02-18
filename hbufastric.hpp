@@ -135,9 +135,9 @@ class TriangulateAggrBufferedHeuristics
           {
             Edge const& edge_n = g_->get_edge(n);
                 
-            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_) && !edge_within_max(edge_n.tail_, edge_m.edge_->tail_))
+            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
               break;
-            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) && !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
               continue;
 
             send_count[owner] += 1;
@@ -172,11 +172,7 @@ class TriangulateAggrBufferedHeuristics
 
     //TODO FIXME don't hardcode!
     // adjust bufsize
-    if (nghosts_ <= 2)
-      bufsize_ = 5;
-    else
-      bufsize_ = ((nghosts_ < bufsize) ? nghosts_ : bufsize);
-    
+    bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
     free(send_count);
@@ -297,9 +293,9 @@ class TriangulateAggrBufferedHeuristics
               {  
                 Edge const& edge_n = g_->get_edge(n);                                
                 
-                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_) && !edge_within_max(edge_n.tail_, edge.edge_->tail_))
+                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) && !edge_above_min(edge_n.tail_, edge.edge_->tail_))
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
