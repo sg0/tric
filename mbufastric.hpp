@@ -62,7 +62,7 @@
 class MapUniq
 {
   public:
-    MapUniq(): data_(0) {}
+    MapUniq(): data_(0), count_(-1) {}
     ~MapUniq() { data_.clear(); }
 
     void insert(GraphElem key, GraphElem value)
@@ -78,11 +78,17 @@ class MapUniq
         if (it != data_[key].end())
           it->second += 1;
         else
+        {
           data_[key].push_back(std::pair<GraphElem, GraphElem>(value, 1));
+          count_ += 1;
+        }
       }
       else
+      {
         data_.insert({key, std::vector<std::pair<GraphElem, GraphElem>>()});
         data_[key].push_back(std::pair<GraphElem, GraphElem>(value, 1));
+        count_ += 2;
+      }
     }
 
     void clear() {data_.clear(); }
@@ -103,8 +109,11 @@ class MapUniq
 
     GraphElem size() const
     { return data_.size(); }
-
+    
     GraphElem count() const
+    { return count_ + data_.size(); }
+
+    GraphElem do_count() const
     {
       GraphElem mcnt = this->size(); // #keys
       
@@ -128,6 +137,7 @@ class MapUniq
     }
 
   private:
+    GraphElem count_;
 #if defined(USE_STD_MAP)
     std::map<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>> data_;
 #else
@@ -320,7 +330,7 @@ class TriangulateAggrBufferedMap
 
     void flatten_nbsend(GraphElem owner)
     {
-      sbuf_ctr_[pindex_[owner]] = edge_map_[pindex_[owner]].count() + edge_map_[pindex_[owner]].size();
+      sbuf_ctr_[pindex_[owner]] = edge_map_[pindex_[owner]].count() + (edge_map_[pindex_[owner]].size()-1);
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
         edge_map_[pindex_[owner]].serialize(&sbuf_[pindex_[owner]*bufsize_]);
