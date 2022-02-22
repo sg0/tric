@@ -37,8 +37,8 @@
 //
 // ************************************************************************ 
 #pragma once
-#ifndef CYBUF_HFASTRIC_HPP
-#define CYBUF_HFASTRIC_HPP
+#ifndef MAP_HFASTRIC_HPP
+#define MAP_HFASTRIC_HPP
 
 #include "graph.hpp"
 
@@ -111,11 +111,11 @@ class MapUniq
     { return data_.size(); }
     
     GraphElem count() const
-    { return count_ + data_.size(); }
+    { return count_ + this->size(); }
 
     GraphElem do_count() const
     {
-      GraphElem mcnt = this->size(); // #keys
+      GraphElem mcnt = this->size(); 
       
       for (auto it = data_.begin(); it != data_.end(); ++it)
         for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
@@ -321,6 +321,7 @@ class TriangulateAggrBufferedMap
 
       pindex_.clear();
       targets_.clear();
+      edge_map_.clear();
     }
 
     // TODO
@@ -566,7 +567,6 @@ class TriangulateAggrBufferedMap
             GraphElem idx = static_cast<GraphElem>(inds[i]);
             sbuf_ctr_[idx] = 0;
             stat_[idx] = '0';
-            edge_map_[idx].clear();
           }
         }
 
