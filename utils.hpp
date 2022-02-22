@@ -66,6 +66,14 @@
 #define MAX(x,y)                    ((x > y) ? (x) : (y))
 #define MIN(x,y)                    ((x < y) ? (x) : (y))
 
+#define ONE                         (1)
+#define TWO                         (2)
+#define FIVE                        (5)
+#define PERCOF(x,y)                 std::ceil((y) * ((x) / 100))
+#define ONEPERCOF(y)                PERCOF(ONE, y)
+#define TWOPERCOF(y)                PERCOF(TWO, y)
+#define FIVEPERCOF(y)               PERCOF(FIVE, y)
+
 #include <random>
 #include <utility>
 #include <cstring>
@@ -84,7 +92,7 @@ const MPI_Datatype MPI_WEIGHT_TYPE = MPI_DOUBLE;
 
 extern unsigned seed;
 
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP)
 #ifndef DEFAULT_BUF_SIZE
 #define DEFAULT_BUF_SIZE   (8000)
 #endif

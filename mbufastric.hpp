@@ -37,8 +37,8 @@
 //
 // ************************************************************************ 
 #pragma once
-#ifndef BUF_HFASTRIC_HPP
-#define BUF_HFASTRIC_HPP
+#ifndef CYBUF_HFASTRIC_HPP
+#define CYBUF_HFASTRIC_HPP
 
 #include "graph.hpp"
 
@@ -47,21 +47,103 @@
 #include <cstring>
 #include <iomanip>
 #include <limits>
+#include <algorithm>
+#include <map>
+#include <unordered_map>
+
+#if __cplusplus >= 202002L
+#include <ranges>
+#endif
 
 #ifndef TAG_DATA
 #define TAG_DATA 100
 #endif
 
+class MapUniq
+{
+  public:
+    MapUniq(): data_(0) {}
+    ~MapUniq() { data_.clear(); }
 
-class TriangulateAggrBufferedHeuristics
+    void insert(GraphElem key, GraphElem value)
+    {
+      if (data_.count(key) > 0)
+      {
+#if __cplusplus >= 202002L
+        auto it = std::ranges::find(data_[key], value, &std::pair<GraphElem, GraphElem>::first);
+#else
+        auto it = std::find_if(data_[key].begin(), data_[key].end(),
+                [&value](const std::pair<GraphElem, GraphElem>& element){ return element.first == value;} );
+#endif
+        if (it != data_[key].end())
+          it->second += 1;
+        else
+          data_[key].push_back(std::pair<GraphElem, GraphElem>(value, 1));
+      }
+      else
+        data_.insert({key, std::vector<std::pair<GraphElem, GraphElem>>()});
+        data_[key].push_back(std::pair<GraphElem, GraphElem>(value, 1));
+    }
+
+    void clear() {data_.clear(); }
+
+    void serialize(GraphElem *buf)
+    {
+      for (auto it = data_.begin(); it != data_.end(); ++it)
+      {
+        *buf++ = it->first;
+        for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
+        {
+          *buf++ = vit->first;
+          *buf++ = vit->second;
+        }
+        *buf++ = -1;
+      }
+    }
+
+    GraphElem size() const
+    { return data_.size(); }
+
+    GraphElem count() const
+    {
+      GraphElem mcnt = this->size(); // #keys
+      
+      for (auto it = data_.begin(); it != data_.end(); ++it)
+        for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
+          mcnt += 2;
+      
+      return mcnt;
+    }
+
+    void print() const
+    {
+      std::cout << "#Elements (keys/values): " << this->count() << std::endl;
+      for (auto it = data_.begin(); it != data_.end(); ++it)
+      {
+        std::cout << "map[" << it->first << "]: ";
+        for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
+          std::cout << vit->first << "," << vit->second << " ";
+        std::cout << std::endl;
+      }
+    }
+
+  private:
+#if defined(USE_STD_MAP)
+    std::map<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>> data_;
+#else
+    std::unordered_map<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>> data_;
+#endif
+};
+
+class TriangulateAggrBufferedMap
 {
   public:
 
-    TriangulateAggrBufferedHeuristics(Graph* g, const GraphElem bufsize): 
+    TriangulateAggrBufferedMap(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(-1)
+      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(-1), edge_map_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -172,7 +254,7 @@ class TriangulateAggrBufferedHeuristics
 
     //TODO FIXME don't hardcode!
     // adjust bufsize
-    bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
+    bufsize_ = ((nghosts_*4) < bufsize) ? (nghosts_*4) : bufsize;
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
     if (rank_ == 0)
@@ -194,6 +276,8 @@ class TriangulateAggrBufferedHeuristics
     stat_     = new char[pdegree_];
     sreq_     = new MPI_Request[pdegree_];
 
+    edge_map_.resize(pdegree_);
+
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
@@ -211,7 +295,7 @@ class TriangulateAggrBufferedHeuristics
 #endif
   }
 
-    ~TriangulateAggrBufferedHeuristics() {}
+    ~TriangulateAggrBufferedMap() {}
 
     void clear()
     {
@@ -234,19 +318,24 @@ class TriangulateAggrBufferedHeuristics
     {
     }
 
-    void nbsend(GraphElem owner)
+    void flatten_nbsend(GraphElem owner)
     {
+      sbuf_ctr_[pindex_[owner]] = edge_map_[pindex_[owner]].count() + edge_map_[pindex_[owner]].size();
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
+        edge_map_[pindex_[owner]].serialize(&sbuf_[pindex_[owner]*bufsize_]);
+        
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+        
+        edge_map_[pindex_[owner]].clear();
       }
     }
 
-    void nbsend()
+    void flatten_nbsend()
     {
       for (int const& p : targets_)
-        nbsend(p);
+        flatten_nbsend(p);
     }
 
     inline void lookup_edges()
@@ -273,24 +362,21 @@ class TriangulateAggrBufferedHeuristics
           {   
             if (stat_[pidx] == '1') 
               continue;
-
+          
             if (m >= prev_m_[pidx])
             {
               const GraphElem disp = pidx*bufsize_;
 
-              if (sbuf_ctr_[pidx] == (bufsize_-1))
+              if ((bufsize_ - edge_map_[pidx].count()) <= ONEPERCOF(bufsize_))
               {
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
                 stat_[pidx] = '1'; // messages in-flight
 
-                nbsend(owner);
+                flatten_nbsend(owner);
 
                 continue;
               }
-
-              sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
-              sbuf_ctr_[pidx] += 1;
 
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
               {  
@@ -301,24 +387,20 @@ class TriangulateAggrBufferedHeuristics
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
-                if (sbuf_ctr_[pidx] == (bufsize_-1))
+                if ((bufsize_ - edge_map_[pidx].count()) <= ONEPERCOF(bufsize_))
                 {
                   prev_m_[pidx] = m;
                   prev_k_[pidx] = n;
-
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
-                  sbuf_ctr_[pidx] += 1;
                   stat_[pidx] = '1'; 
 
-                  nbsend(owner);
+                  flatten_nbsend(owner);
 
                   break;
                 }
-                              
-                sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
-                sbuf_ctr_[pidx] += 1;
+                  
                 out_nghosts_ -= 1;
                 vcount_[i] -= 1;
+                edge_map_[pidx].insert(edge.edge_->tail_, edge_n.tail_);
               }
               
               if (stat_[pidx] == '0') 
@@ -327,19 +409,11 @@ class TriangulateAggrBufferedHeuristics
                 prev_k_[pidx] = -1;
                 
                 edge.active_ = false;
-
-                if (sbuf_ctr_[pidx] == (bufsize_-1))
+                
+                if ((bufsize_ - edge_map_[pidx].count()) <= ONEPERCOF(bufsize_))
                 {
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
-                  sbuf_ctr_[pidx] += 1;
                   stat_[pidx] = '1';
-
-                  nbsend(owner);
-                }
-                else
-                {
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
-                  sbuf_ctr_[pidx] += 1;
+                  flatten_nbsend(owner);
                 }
               }
             }
@@ -419,7 +493,7 @@ class TriangulateAggrBufferedHeuristics
         tup[0] = rbuf_[k];
         GraphElem curr_count = 0;
 
-        for (GraphElem m = k + 1; m < count; m++)
+        for (GraphElem m = k + 1; m < count; m+=2)
         {
           if (rbuf_[m] == -1)
           {
@@ -430,9 +504,9 @@ class TriangulateAggrBufferedHeuristics
           tup[1] = rbuf_[m];
 
           if (check_edgelist(tup))
-            ntriangles_ += 1;
+            ntriangles_ += rbuf_[m+1];
 
-          in_nghosts_ -= 1;
+          in_nghosts_ -= rbuf_[m+1];
         }
 
         k += (curr_count - prev);
@@ -452,6 +526,7 @@ class TriangulateAggrBufferedHeuristics
       bool sends_done = false;
       int *inds = new int[pdegree_];
       int over = -1;
+      int odd_or_even = 0;
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
@@ -463,7 +538,7 @@ class TriangulateAggrBufferedHeuristics
         {
           if (!sends_done)
           {
-            nbsend();
+            flatten_nbsend();
             sends_done = true;
           }
         }
@@ -481,6 +556,7 @@ class TriangulateAggrBufferedHeuristics
             GraphElem idx = static_cast<GraphElem>(inds[i]);
             sbuf_ctr_[idx] = 0;
             stat_[idx] = '0';
+            edge_map_[idx].clear();
           }
         }
 
@@ -507,7 +583,7 @@ class TriangulateAggrBufferedHeuristics
 #endif
 #if defined(DEBUG_PRINTF)
         std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
-#endif            
+#endif
       }
 
       GraphElem ttc = 0, ltc = ntriangles_;
@@ -529,6 +605,8 @@ class TriangulateAggrBufferedHeuristics
     char *stat_;
 
     std::vector<GraphElem> targets_;
+
+    std::vector<MapUniq> edge_map_;
 
     int rank_, size_;
     std::unordered_map<GraphElem, GraphElem> pindex_; 
