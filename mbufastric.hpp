@@ -62,7 +62,7 @@
 class MapUniq
 {
   public:
-    MapUniq(): data_(0), count_(-1) {}
+    MapUniq(): data_(0), count_(0) {}
     ~MapUniq() { data_.clear(); }
 
     void insert(GraphElem key, GraphElem value)
@@ -80,7 +80,7 @@ class MapUniq
         else
         {
           data_[key].push_back(std::pair<GraphElem, GraphElem>(value, 1));
-          count_ += 1;
+          count_ += 2;
         }
       }
       else
