@@ -93,7 +93,9 @@ class MapUniq
 
     void clear() 
     {
-      data_.clear(); 
+      for (auto it = data_.begin(); it != data_.end(); ++it)
+        it->second.clear();
+      data_.clear();
       count_ = 0;
     }
 
