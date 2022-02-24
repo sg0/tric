@@ -91,7 +91,11 @@ class MapUniq
       }
     }
 
-    void clear() {data_.clear(); }
+    void clear() 
+    {
+      data_.clear(); 
+      count_ = 0;
+    }
 
     void serialize(GraphElem *buf)
     {
@@ -337,9 +341,7 @@ class TriangulateAggrBufferedMap
         edge_map_[pindex_[owner]].serialize(&sbuf_[pindex_[owner]*bufsize_]);
         
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
-            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
-        
-        edge_map_[pindex_[owner]].clear();
+            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);  
       }
     }
 
@@ -567,6 +569,7 @@ class TriangulateAggrBufferedMap
             GraphElem idx = static_cast<GraphElem>(inds[i]);
             sbuf_ctr_[idx] = 0;
             stat_[idx] = '0';
+            edge_map_[idx].clear();
           }
         }
 
