@@ -337,11 +337,11 @@ class TriangulateAggrBufferedMap
 
     void flatten_nbsend(GraphElem owner)
     {
-      sbuf_ctr_[pindex_[owner]] = edge_map_[pindex_[owner]].count() + (edge_map_[pindex_[owner]].size()-1);
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
         edge_map_[pindex_[owner]].serialize(&sbuf_[pindex_[owner]*bufsize_]);
-        
+        sbuf_ctr_[pindex_[owner]] += edge_map_[pindex_[owner]].size();
+
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);  
       }
@@ -382,7 +382,7 @@ class TriangulateAggrBufferedMap
             {
               const GraphElem disp = pidx*bufsize_;
 
-              if ((bufsize_ - edge_map_[pidx].count()) <= ONEPERCOF(bufsize_))
+              if ((bufsize_ - sbuf_ctr_[pidx]) <= ONEPERCOF(bufsize_))
               {
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
@@ -402,7 +402,7 @@ class TriangulateAggrBufferedMap
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
-                if ((bufsize_ - edge_map_[pidx].count()) <= ONEPERCOF(bufsize_))
+                if ((bufsize_ - sbuf_ctr_[pidx]) <= ONEPERCOF(bufsize_))
                 {
                   prev_m_[pidx] = m;
                   prev_k_[pidx] = n;
@@ -416,6 +416,7 @@ class TriangulateAggrBufferedMap
                 out_nghosts_ -= 1;
                 vcount_[i] -= 1;
                 edge_map_[pidx].insert(edge.edge_->tail_, edge_n.tail_);
+                sbuf_ctr_[pidx] = edge_map_[pidx].count();
               }
               
               if (stat_[pidx] == '0') 
@@ -425,7 +426,7 @@ class TriangulateAggrBufferedMap
                 
                 edge.active_ = false;
                 
-                if ((bufsize_ - edge_map_[pidx].count()) <= ONEPERCOF(bufsize_))
+                if ((bufsize_ - sbuf_ctr_[pidx]) <= ONEPERCOF(bufsize_))
                 {
                   stat_[pidx] = '1';
                   flatten_nbsend(owner);
@@ -491,27 +492,27 @@ class TriangulateAggrBufferedMap
             TAG_DATA, comm_, MPI_STATUS_IGNORE);       
       }
       else
-          return;
+        return;
 
       for (GraphElem k = 0; k < count;)
       {
-          tup[0] = rbuf_[k];
+        tup[0] = rbuf_[k];
 
-          for (GraphElem m = k + 1; m < count; m+=2)
+        for (GraphElem m = k + 1; m < count; m+=2)
+        {
+          if (rbuf_[m] == -1)
           {
-              if (rbuf_[m] == -1)
-              {
-                  k = m + 1;
-                  break;
-              }
-              
-              tup[1] = rbuf_[m];
-
-              if (check_edgelist(tup))
-                  ntriangles_ += rbuf_[m+1];
-
-              in_nghosts_ -= rbuf_[m+1];
+            k = m + 1;
+            break;
           }
+
+          tup[1] = rbuf_[m];
+
+          if (check_edgelist(tup))
+            ntriangles_ += rbuf_[m+1];
+
+          in_nghosts_ -= rbuf_[m+1];
+        }
       }
     }
 
