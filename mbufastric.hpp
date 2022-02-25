@@ -382,7 +382,7 @@ class TriangulateAggrBufferedMap
             {
               const GraphElem disp = pidx*bufsize_;
 
-              if ((bufsize_ - sbuf_ctr_[pidx]) <= ONEPERCOF(bufsize_))
+              if (sbuf_ctr_[pidx] == (bufsize_ - edge_map_[pidx].size() - 3)) // 3 because an insertion could be the triplet: key:{val,count}
               {
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
@@ -402,7 +402,7 @@ class TriangulateAggrBufferedMap
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
-                if ((bufsize_ - sbuf_ctr_[pidx]) <= ONEPERCOF(bufsize_))
+                if (sbuf_ctr_[pidx] == (bufsize_ - edge_map_[pidx].size() - 3)) 
                 {
                   prev_m_[pidx] = m;
                   prev_k_[pidx] = n;
@@ -426,7 +426,7 @@ class TriangulateAggrBufferedMap
                 
                 edge.active_ = false;
                 
-                if ((bufsize_ - sbuf_ctr_[pidx]) <= ONEPERCOF(bufsize_))
+                if (sbuf_ctr_[pidx] == (bufsize_ - edge_map_[pidx].size() - 3)) 
                 {
                   stat_[pidx] = '1';
                   flatten_nbsend(owner);
