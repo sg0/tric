@@ -270,14 +270,14 @@ class TriangulateAggrBufferedMap
 
     //TODO FIXME don't hardcode!
     // adjust bufsize
-    bufsize_ = ((nghosts_*4) < bufsize) ? (nghosts_*4) : bufsize;
+    bufsize_ = ((nghosts_*3) < bufsize) ? (nghosts_*3) : bufsize;
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
 
-    free(send_count);
-    free(recv_count);
+    delete []send_count;
+    delete []recv_count;
 
     pdegree_ = targets_.size(); 
 
@@ -592,7 +592,7 @@ class TriangulateAggrBufferedMap
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
-      free(inds);
+      delete []inds;
 
       return (ttc/3);
     }
