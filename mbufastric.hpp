@@ -478,7 +478,7 @@ class TriangulateAggrBufferedMap
     {
       MPI_Status status;
       int flag = -1;
-      GraphElem tup[2] = {-1,-1}, k = 0, prev = 0;
+      GraphElem tup[2] = {-1,-1};
       int count = 0, source = -1;
 
       MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, comm_, &flag, &status);
@@ -491,41 +491,27 @@ class TriangulateAggrBufferedMap
             TAG_DATA, comm_, MPI_STATUS_IGNORE);       
       }
       else
-        return;
+          return;
 
-      while(1)
+      for (GraphElem k = 0; k < count;)
       {
-        if (k == count)
-          break;
+          tup[0] = rbuf_[k];
 
-        if (rbuf_[k] == -1)
-        {
-          k += 1;
-          prev = k;
-          continue;
-        }
-
-        tup[0] = rbuf_[k];
-        GraphElem curr_count = 0;
-
-        for (GraphElem m = k + 1; m < count; m+=2)
-        {
-          if (rbuf_[m] == -1)
+          for (GraphElem m = k + 1; m < count; m+=2)
           {
-            curr_count = m + 1;
-            break;
+              if (rbuf_[m] == -1)
+              {
+                  k = m + 1;
+                  break;
+              }
+              
+              tup[1] = rbuf_[m];
+
+              if (check_edgelist(tup))
+                  ntriangles_ += rbuf_[m+1];
+
+              in_nghosts_ -= rbuf_[m+1];
           }
-
-          tup[1] = rbuf_[m];
-
-          if (check_edgelist(tup))
-            ntriangles_ += rbuf_[m+1];
-
-          in_nghosts_ -= rbuf_[m+1];
-        }
-
-        k += (curr_count - prev);
-        prev = k;
       }
     }
 
