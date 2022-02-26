@@ -63,7 +63,11 @@ class MapUniq
 {
   public:
     MapUniq(): data_(0), count_(0) {}
-    ~MapUniq() { data_.clear(); }
+    ~MapUniq() 
+    { 
+      data_.clear(); 
+      count_ = 0;
+    }
 
     void insert(GraphElem key, GraphElem value)
     {
@@ -99,17 +103,17 @@ class MapUniq
       count_ = 0;
     }
 
-    void serialize(GraphElem *buf)
+    void serialize(GraphElem* ptr)
     {
       for (auto it = data_.begin(); it != data_.end(); ++it)
       {
-        *buf++ = it->first;
+        *ptr++ = it->first;
         for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
         {
-          *buf++ = vit->first;
-          *buf++ = vit->second;
+          *ptr++ = vit->first;
+          *ptr++ = vit->second;
         }
-        *buf++ = -1;
+        *ptr++ = -1;
       }
     }
 
@@ -156,9 +160,9 @@ class TriangulateAggrBufferedMap
   public:
 
     TriangulateAggrBufferedMap(Graph* g, const GraphElem bufsize): 
-      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
-      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
-      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
+      g_(g), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), sreq_(nullptr), 
+      erange_(nullptr), vcount_(nullptr), ntriangles_(0), nghosts_(0), 
+      out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(-1), edge_map_(0)
   {
     comm_ = g_->get_comm();
@@ -270,7 +274,8 @@ class TriangulateAggrBufferedMap
 
     //TODO FIXME don't hardcode!
     // adjust bufsize
-    bufsize_ = ((nghosts_*3) < bufsize) ? (nghosts_*3) : bufsize;
+    bufsize_ = (nghosts_ < bufsize) ? nghosts_ : bufsize;
+    bufsize_ -= bufsize_%3;
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
     if (rank_ == 0)
@@ -286,7 +291,6 @@ class TriangulateAggrBufferedMap
 
     rbuf_     = new GraphElem[bufsize_];
     sbuf_     = new GraphElem[pdegree_*bufsize_];
-    sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
     stat_     = new char[pdegree_];
@@ -317,7 +321,6 @@ class TriangulateAggrBufferedMap
     {
       delete []sbuf_;
       delete []rbuf_;
-      delete []sbuf_ctr_;
       delete []sreq_;
       delete []prev_k_;
       delete []prev_m_;
@@ -337,12 +340,12 @@ class TriangulateAggrBufferedMap
 
     void flatten_nbsend(GraphElem owner)
     {
-      if (sbuf_ctr_[pindex_[owner]] > 0)
+      if (edge_map_[pindex_[owner]].size() > 0)
       {
         edge_map_[pindex_[owner]].serialize(&sbuf_[pindex_[owner]*bufsize_]);
-        sbuf_ctr_[pindex_[owner]] += edge_map_[pindex_[owner]].size();
 
-        MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
+        MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], 
+            edge_map_[pindex_[owner]].size() + edge_map_[pindex_[owner]].count(),
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);  
       }
     }
@@ -382,7 +385,7 @@ class TriangulateAggrBufferedMap
             {
               const GraphElem disp = pidx*bufsize_;
 
-              if (sbuf_ctr_[pidx] == (bufsize_ - edge_map_[pidx].size() - 3)) // 3 because an insertion could be the triplet: key:{val,count}
+              if ((edge_map_[pidx].size() + edge_map_[pidx].count()) == (bufsize_ - 3)) // 3 because an insertion could be the triplet: key:{val,count}
               {
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
@@ -402,7 +405,7 @@ class TriangulateAggrBufferedMap
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
-                if (sbuf_ctr_[pidx] == (bufsize_ - edge_map_[pidx].size() - 3)) 
+                if ((edge_map_[pidx].size() + edge_map_[pidx].count())  == (bufsize_-3)) 
                 {
                   prev_m_[pidx] = m;
                   prev_k_[pidx] = n;
@@ -416,7 +419,6 @@ class TriangulateAggrBufferedMap
                 out_nghosts_ -= 1;
                 vcount_[i] -= 1;
                 edge_map_[pidx].insert(edge.edge_->tail_, edge_n.tail_);
-                sbuf_ctr_[pidx] = edge_map_[pidx].count();
               }
               
               if (stat_[pidx] == '0') 
@@ -426,7 +428,7 @@ class TriangulateAggrBufferedMap
                 
                 edge.active_ = false;
                 
-                if (sbuf_ctr_[pidx] == (bufsize_ - edge_map_[pidx].size() - 3)) 
+                if ((edge_map_[pidx].size() + edge_map_[pidx].count())  == (bufsize_-3)) 
                 {
                   stat_[pidx] = '1';
                   flatten_nbsend(owner);
@@ -556,7 +558,6 @@ class TriangulateAggrBufferedMap
           for (int i = 0; i < over; i++)
           {
             GraphElem idx = static_cast<GraphElem>(inds[i]);
-            sbuf_ctr_[idx] = 0;
             stat_[idx] = '0';
             edge_map_[idx].clear();
           }
@@ -602,12 +603,11 @@ class TriangulateAggrBufferedMap
 
     GraphElem ntriangles_;
     GraphElem bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
-    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
+    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *vcount_, *erange_;
     MPI_Request *sreq_;
     char *stat_;
 
     std::vector<GraphElem> targets_;
-
     std::vector<MapUniq> edge_map_;
 
     int rank_, size_;
