@@ -347,6 +347,8 @@ class TriangulateAggrBufferedMap
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], 
             edge_map_[pindex_[owner]].size() + edge_map_[pindex_[owner]].count(),
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);  
+            
+        edge_map_[pindex_[owner]].clear();
       }
     }
 
@@ -559,7 +561,6 @@ class TriangulateAggrBufferedMap
           {
             GraphElem idx = static_cast<GraphElem>(inds[i]);
             stat_[idx] = '0';
-            edge_map_[idx].clear();
           }
         }
 
