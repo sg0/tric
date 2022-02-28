@@ -346,9 +346,7 @@ class TriangulateAggrBufferedMap
 
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], 
             edge_map_[pindex_[owner]].size() + edge_map_[pindex_[owner]].count(),
-            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);  
-            
-        edge_map_[pindex_[owner]].clear();
+            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);        
       }
     }
 
@@ -387,7 +385,7 @@ class TriangulateAggrBufferedMap
             {
               const GraphElem disp = pidx*bufsize_;
 
-              if ((edge_map_[pidx].size() + edge_map_[pidx].count()) == (bufsize_ - 3)) // 3 because an insertion could be the triplet: key:{val,count}
+              if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3)) // 3 because an insertion could be the triplet: key:{val,count}
               {
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
@@ -407,7 +405,7 @@ class TriangulateAggrBufferedMap
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
-                if ((edge_map_[pidx].size() + edge_map_[pidx].count())  == (bufsize_-3)) 
+                if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3))
                 {
                   prev_m_[pidx] = m;
                   prev_k_[pidx] = n;
@@ -430,7 +428,7 @@ class TriangulateAggrBufferedMap
                 
                 edge.active_ = false;
                 
-                if ((edge_map_[pidx].size() + edge_map_[pidx].count())  == (bufsize_-3)) 
+                if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3))
                 {
                   stat_[pidx] = '1';
                   flatten_nbsend(owner);
@@ -561,6 +559,7 @@ class TriangulateAggrBufferedMap
           {
             GraphElem idx = static_cast<GraphElem>(inds[i]);
             stat_[idx] = '0';
+            edge_map_[idx].clear();
           }
         }
 
