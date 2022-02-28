@@ -62,7 +62,7 @@
 class MapUniq
 {
   public:
-    MapUniq(): data_(0), count_(0) {}
+    MapUniq(): count_(0), data_() {}
     ~MapUniq() 
     { 
       data_.clear(); 
@@ -83,14 +83,14 @@ class MapUniq
           it->second += 1;
         else
         {
-          data_[key].push_back(std::pair<GraphElem, GraphElem>(value, 1));
+          data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
           count_ += 2;
         }
       }
       else
       {
         data_.insert({key, std::vector<std::pair<GraphElem, GraphElem>>()});
-        data_[key].push_back(std::pair<GraphElem, GraphElem>(value, 1));
+        data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
         count_ += 2;
       }
     }
