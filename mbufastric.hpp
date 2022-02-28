@@ -89,7 +89,7 @@ class MapUniq
       }
       else
       {
-        data_.insert({key, std::vector<std::pair<GraphElem, GraphElem>>()});
+        data_.emplace(key, std::vector<std::pair<GraphElem, GraphElem>>());
         data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
         count_ += 2;
       }
