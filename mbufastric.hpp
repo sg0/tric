@@ -83,14 +83,27 @@ class MapUniq
           it->second += 1;
         else
         {
+#if defined(USE_STD_MAP_MAP) || defined(USE_STD_MAP_UNO_MAP) || defined(USE_STD_UNO_MAP_MAP) || defined(USE_STD_UNO_MAP_UNO_MAP)
+          data_[key].insert(std::pair<GraphElem, GraphElem>(value, 1));
+#else
           data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
+#endif
           count_ += 2;
         }
       }
       else
       {
+#if defined(USE_STD_MAP_MAP) || defined(USE_STD_MAP_UNO_MAP) || defined(USE_STD_UNO_MAP_MAP) || defined(USE_STD_UNO_MAP_UNO_MAP)
+#if defined(USE_STD_MAP_MAP) || defined(USE_STD_UNO_MAP_MAP)
+        data_.emplace(key, std::map<GraphElem, GraphElem>());
+#else
+        data_.emplace(key, std::unordered_map<GraphElem, GraphElem>());
+#endif
+        data_[key].insert(std::pair<GraphElem, GraphElem>(value, 1));
+#else
         data_.emplace(key, std::vector<std::pair<GraphElem, GraphElem>>());
         data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
+#endif
         count_ += 2;
       }
     }
@@ -148,7 +161,15 @@ class MapUniq
 
   private:
     GraphElem count_;
-#if defined(USE_STD_MAP)
+#if defined(USE_STD_MAP_MAP)
+    std::map<GraphElem, std::map<GraphElem, GraphElem>> data_;
+#elif defined(USE_STD_UNO_MAP_MAP)
+    std::unordered_map<GraphElem, std::map<GraphElem, GraphElem>> data_;
+#elif defined(USE_STD_MAP_UNO_MAP)
+    std::map<GraphElem, std::unordered_map<GraphElem, GraphElem>> data_;
+#elif defined(USE_STD_UNO_MAP_UNO_MAP)
+    std::unordered_map<GraphElem, std::unordered_map<GraphElem, GraphElem>> data_;
+#elif defined(USE_STD_MAP)
     std::map<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>> data_;
 #else
     std::unordered_map<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>> data_;
