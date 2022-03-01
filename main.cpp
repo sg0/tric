@@ -69,7 +69,9 @@
 #include "rmabufastric.hpp"
 #elif defined(AGGR_HEUR) // comm-avoiding heuristics
 #include "hbufastric.hpp"
-#elif defined(AGGR_MAP) // map-based
+#elif defined(AGGR_ARR) // aggregate buffered + heuristics using arrays
+#include "abufastric.hpp"
+#elif defined(AGGR_MAP) // aggregate buffered + heuristics using map
 #include "mbufastric.hpp"
 #elif defined(STM8_ONESIDED)
 #include "estric.hpp"
@@ -88,6 +90,7 @@ static bool readBalanced = false;
 static GraphWeight randomEdgePercent = 0.0;
 static bool randomNumberLCG = false;
 static bool estimateTriangles = false;
+static bool bufferSet = false;
 static long bufferSize = 0;
 
 // parse command line parameters
@@ -186,6 +189,8 @@ int main(int argc, char *argv[])
   TriangulateAggrBufferedRMA tr(g, bufferSize);
 #elif defined(AGGR_MAP)
   TriangulateAggrBufferedMap tr(g, bufferSize);
+#elif defined(AGGR_ARR)
+  TriangulateAggrBufferedArr tr(g, bufferSize);
 #else
   TriangulateAggrBufferedHeuristics tr(g, bufferSize);
 #endif
@@ -214,8 +219,8 @@ int main(int argc, char *argv[])
     std::cout << "Number of triangles: " << ntris << std::endl;
 #endif
     else
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP)
-      std::cout << "Per-PE buffer count: " << bufferSize << std::endl;
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_ARR)
+      std::cout << "User initialized per-PE buffer count: " << bufferSize << std::endl;
 #endif
     std::cout << "Number of triangles: " << ntris << std::endl;
 
@@ -261,6 +266,7 @@ void parseCommandLine(const int argc, char * const argv[])
         estimateTriangles = true;
         break;
       case 's':
+        bufferSet = true;
         bufferSize = atol(optarg);
         break;
       default:
@@ -270,6 +276,13 @@ void parseCommandLine(const int argc, char * const argv[])
   }
 
   // warnings/info
+
+#if !defined(AGGR_BUFR) || !defined(AGGR_BUFR_RMA) || !defined(AGGR_HEUR) || !defined(AGGR_MAP) || !defined(AGGR_ARR)
+  if (me == 0 && bufferSet) 
+  {
+    std::cout << "Setting a buffer size using -s <...> is pointless for non-aggregate buffered versions." << std::endl;
+  } 
+#endif
 
   if (me == 0 && generateGraph && readBalanced) 
   {
