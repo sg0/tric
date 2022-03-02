@@ -69,7 +69,7 @@ class MapUniq
       count_ = 0;
     }
 
-    void insert(GraphElem key, GraphElem value)
+    inline void insert(GraphElem key, GraphElem value)
     {
       if (data_.count(key) > 0)
       {
@@ -108,7 +108,7 @@ class MapUniq
       }
     }
 
-    void clear() 
+    inline void clear() 
     {
       for (auto it = data_.begin(); it != data_.end(); ++it)
         it->second.clear();
@@ -116,7 +116,7 @@ class MapUniq
       count_ = 0;
     }
 
-    void serialize(GraphElem* ptr)
+    inline void serialize(GraphElem* ptr)
     {
       for (auto it = data_.begin(); it != data_.end(); ++it)
       {
@@ -184,7 +184,8 @@ class TriangulateAggrBufferedMap
       g_(g), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), sreq_(nullptr), 
       erange_(nullptr), vcount_(nullptr), ntriangles_(0), nghosts_(0), 
       out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(-1), edge_map_(0)
+      prev_k_(nullptr), stat_(nullptr), sdispls_(nullptr), targets_(0), 
+      inbufsize_(0), outbufsize_(0), edge_map_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -192,6 +193,8 @@ class TriangulateAggrBufferedMap
 
     GraphElem *send_count = new GraphElem[size_]();
     GraphElem *recv_count = new GraphElem[size_]();
+    GraphElem *upd_send_count = new GraphElem[size_]();
+    GraphElem *upd_recv_count = new GraphElem[size_]();
 
     const GraphElem lnv = g_->get_lnv();
     const GraphElem nv = g_->get_nv();
@@ -222,6 +225,8 @@ class TriangulateAggrBufferedMap
     
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
+
+    GraphElem nkeys = 0;
 
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -266,6 +271,8 @@ class TriangulateAggrBufferedMap
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
+
+          nkeys += 1;
         }
       }
     }
@@ -282,36 +289,37 @@ class TriangulateAggrBufferedMap
       std::cout << "Average time for local counting during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
-
-    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
-
-    for (GraphElem p = 0; p < size_; p++)
-    {
-      out_nghosts_ += send_count[p];
-      in_nghosts_ += recv_count[p];
-    }
-
-    nghosts_ = out_nghosts_ + in_nghosts_;
-
-    //TODO FIXME don't hardcode!
-    // adjust bufsize
-    bufsize_ = (nghosts_ < bufsize) ? nghosts_ : bufsize;
-    bufsize_ -= bufsize_%3;
-    MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
-
-    if (rank_ == 0)
-      std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
-
-    delete []send_count;
-    delete []recv_count;
-
+    
     pdegree_ = targets_.size(); 
 
     for (int i = 0; i < pdegree_; i++)
       pindex_.insert({targets_[i], static_cast<GraphElem>(i)});
 
-    rbuf_     = new GraphElem[bufsize_];
-    sbuf_     = new GraphElem[pdegree_*bufsize_];
+    sdispls_ = new GraphElem[pdegree_];
+
+    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
+
+    GraphElem upd_bufsize = bufsize - bufsize%3;
+    for (GraphElem p = 0; p < size_; p++)
+    {
+      if (send_count[p] > 0)
+      {
+        sdispls_[pindex_[p]] = outbufsize_;
+        upd_send_count[p] = ((nkeys + send_count[p]*3) < upd_bufsize) ? (nkeys + send_count[p]*3) : upd_bufsize;
+        outbufsize_ += upd_send_count[p];
+      }
+
+      out_nghosts_ += send_count[p];
+      in_nghosts_ += recv_count[p];
+    }
+    
+    nghosts_ = out_nghosts_ + in_nghosts_;
+    
+    MPI_Alltoall(upd_send_count, 1, MPI_GRAPH_TYPE, upd_recv_count, 1, MPI_GRAPH_TYPE, comm_);
+    inbufsize_ = std::accumulate(upd_recv_count, upd_recv_count + size_, 0);
+
+    rbuf_     = new GraphElem[inbufsize_];
+    sbuf_     = new GraphElem[outbufsize_];
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
     stat_     = new char[pdegree_];
@@ -334,6 +342,9 @@ class TriangulateAggrBufferedMap
         std::cout << j << ": " << erange_[i] << ", " << erange_[i+1] << std::endl;
     }
 #endif
+
+    delete []send_count;
+    delete []recv_count;
   }
 
     ~TriangulateAggrBufferedMap() {}
@@ -347,6 +358,7 @@ class TriangulateAggrBufferedMap
       delete []prev_m_;
       delete []stat_;
       delete []vcount_;
+      delete []sdispls_;
       delete []erange_;
 
       pindex_.clear();
@@ -363,11 +375,11 @@ class TriangulateAggrBufferedMap
     {
       if (edge_map_[pindex_[owner]].size() > 0)
       {
-        edge_map_[pindex_[owner]].serialize(&sbuf_[pindex_[owner]*bufsize_]);
+        edge_map_[pindex_[owner]].serialize(&sbuf_[sdispls_[pindex_[owner]]]);
 
-        MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], 
+        MPI_Isend(&sbuf_[sdispls_[pindex_[owner]]], 
             edge_map_[pindex_[owner]].size() + edge_map_[pindex_[owner]].count(),
-            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);        
+            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);      
       }
     }
 
@@ -404,9 +416,7 @@ class TriangulateAggrBufferedMap
           
             if (m >= prev_m_[pidx])
             {
-              const GraphElem disp = pidx*bufsize_;
-
-              if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3)) // 3 because an insertion could be the triplet: key:{val,count}
+              if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (outbufsize_ - 3)) // 3 because an insertion could be the triplet: key:{val,count}
               {
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
@@ -426,7 +436,7 @@ class TriangulateAggrBufferedMap
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
-                if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3))
+                if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (outbufsize_ - 3))
                 {
                   prev_m_[pidx] = m;
                   prev_k_[pidx] = n;
@@ -449,7 +459,7 @@ class TriangulateAggrBufferedMap
                 
                 edge.active_ = false;
                 
-                if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3))
+                if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (outbufsize_ - 3))
                 {
                   stat_[pidx] = '1';
                   flatten_nbsend(owner);
@@ -623,8 +633,8 @@ class TriangulateAggrBufferedMap
     Graph* g_;
 
     GraphElem ntriangles_;
-    GraphElem bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
-    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *vcount_, *erange_;
+    GraphElem inbufsize_, outbufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
+    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *vcount_, *erange_, *sdispls_;
     MPI_Request *sreq_;
     char *stat_;
 
