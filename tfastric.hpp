@@ -60,14 +60,15 @@ class TriangulateDegreeBased
     TriangulateDegreeBased(Graph* g): 
       g_(g), sbuf_(nullptr), rbuf_(nullptr),  sreq_(nullptr), erange_(nullptr), 
       nsdispls_(nullptr), nrdispls_(nullptr), stat_(nullptr), sbuf_ctr_(nullptr),
-      pdegree_(0), ntriangles_(0), out_nghosts_(0), in_nghosts_(0), targets_(0) 
+      send_count_(nullptr), recv_count_(nullptr), pdegree_(0), ntriangles_(0), 
+      out_nghosts_(0), in_nghosts_(0), targets_(0) 
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
     MPI_Comm_rank(comm_, &rank_);
 
-    GraphElem *send_count  = new GraphElem[size_]();
-    GraphElem *recv_count  = new GraphElem[size_]();
+    send_count_  = new GraphElem[size_]();
+    recv_count_  = new GraphElem[size_]();
     GraphElem *vsend_count = new GraphElem[size_]();
     GraphElem *vrecv_count = new GraphElem[size_]();
 
@@ -138,11 +139,12 @@ class TriangulateDegreeBased
             past_v = i;
           }
 
-          send_count[owner] += 1;
+          send_count_[owner] += 1;
         }
       }
     }
 
+    ntriangles_ /= 3; // local counting is 3x
     MPI_Barrier(comm_);
 
     double t1 = MPI_Wtime();
@@ -156,7 +158,7 @@ class TriangulateDegreeBased
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
 
-    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
+    MPI_Alltoall(send_count_, 1, MPI_GRAPH_TYPE, recv_count_, 1, MPI_GRAPH_TYPE, comm_);
     MPI_Alltoall(vsend_count, 1, MPI_GRAPH_TYPE, vrecv_count, 1, MPI_GRAPH_TYPE, comm_);
 
     pdegree_ = targets_.size(); 
@@ -177,23 +179,22 @@ class TriangulateDegreeBased
 
     for (GraphElem p = 0; p < size_; p++)
     {
-      if (send_count[p] > 0)
+      if (send_count_[p] > 0)
       {
-        if (send_count[p] > recv_count[p])
+        if (send_count_[p] > recv_count_[p])
         {
+          in_nghosts_ += recv_count_[p];
           stat_[targets_[p]] = '1'; // recv from targets_[p]
           nrdispls_[targets_[p]] = rcount;
-          rcount += (recv_count[p] + 2*vrecv_count[p]);
+          rcount += (recv_count_[p] + 2*vrecv_count[p]);
         }
         else
         {
+          out_nghosts_ += send_count_[p];
           nsdispls_[targets_[p]] = scount;
-          scount += (send_count[p] + 2*vsend_count[p]);
+          scount += (send_count_[p] + 2*vsend_count[p]);
         }
       }
-
-      out_nghosts_ += send_count[p];
-      in_nghosts_ += recv_count[p];
     }
 
     sbuf_ = new GraphElem[scount];
@@ -208,13 +209,11 @@ class TriangulateDegreeBased
     }
 #endif
       
-    free(send_count);
-    free(recv_count);
-    free(vsend_count);
-    free(vrecv_count);
+    delete []vsend_count;
+    delete []vrecv_count;
   }
 
-    ~TriangulateDegreeBased() { clear(); }
+    ~TriangulateDegreeBased() {}
 
     void clear()
     {
@@ -225,6 +224,8 @@ class TriangulateDegreeBased
       delete []nrdispls_;
       delete []stat_;
       delete []erange_;
+      delete []send_count_;
+      delete []recv_count_;
 
       pindex_.clear();
       targets_.clear();
@@ -283,7 +284,6 @@ class TriangulateDegreeBased
 
             sbuf_[nsdispls_[pidx]+sbuf_ctr_[pidx]] = edge_m.tail_;
             sbuf_ctr_[pidx] += 1;
-            out_nghosts_ -= 1;
             c += 1;
           }
         }
@@ -438,21 +438,20 @@ class TriangulateDegreeBased
       bool done = false, nbar_active = false; 
       MPI_Request nbar_req = MPI_REQUEST_NULL;
 #endif
+      
+      int *inds = new int[pdegree_];
+      int over = -1;
 
       // send phase
       outgoing_edges();
-
-      bool sends_done = false;
-      int *inds = new int[pdegree_];
-      int over = -1;
 
       // recv phase
 #if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
 #else
-        while(!done)
+      while(!done)
 #endif
-        {  
+        {
           incoming_edges();
 
           MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
@@ -462,8 +461,7 @@ class TriangulateDegreeBased
             for (int i = 0; i < over; i++)
             {
               GraphElem idx = static_cast<GraphElem>(inds[i]);
-              sbuf_ctr_[idx] = 0;
-              stat_[idx] = '0';
+              out_nghosts_ -= send_count_[targets_[idx]];
             }
           }
 
@@ -481,7 +479,7 @@ class TriangulateDegreeBased
           }
           else
           {
-            if (in_nghosts_ == 0)
+            if ((out_nghosts_ + in_nghosts_) == 0)
             {
               MPI_Ibarrier(comm_, &nbar_req);
               nbar_active = true;
@@ -497,7 +495,7 @@ class TriangulateDegreeBased
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
-      free(inds);
+      delete []inds;
 
       return ttc;
     }
@@ -506,7 +504,7 @@ class TriangulateDegreeBased
     Graph* g_;
 
     GraphElem ntriangles_, out_nghosts_, in_nghosts_, pdegree_;
-    GraphElem *sbuf_, *rbuf_, *erange_, *nsdispls_, *nrdispls_, *sbuf_ctr_;
+    GraphElem *sbuf_, *rbuf_, *erange_, *nsdispls_, *nrdispls_, *sbuf_ctr_, *send_count_, *recv_count_;
     MPI_Request *sreq_;
     char *stat_;
 
