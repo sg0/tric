@@ -111,9 +111,9 @@ class TriangulateDegreeBased
 
       for (GraphElem m = e0; m < e1-1; m++)
       {
-        EdgeStat& edge_m = g_->get_edge_stat(m);
-        const int owner = g_->get_owner(edge_m.edge_->tail_);
-        tup[0] = edge_m.edge_->tail_;
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
+        tup[0] = edge_m.tail_;
 
         if (owner == rank_)
         {
@@ -247,9 +247,11 @@ class TriangulateDegreeBased
 
     void outgoing_edges()
     {
+      const GraphElem lnv = g_->get_lnv();
+      
       for (GraphElem i = 0; i < lnv; i++)
       {
-        GraphElem e0, e1, c = 0;
+        GraphElem e0, e1, c = 0, past_owner = -1;
         g_->edge_range(i, e0, e1);
 
         if ((e0 + 1) == e1)
@@ -257,7 +259,7 @@ class TriangulateDegreeBased
 
         for (GraphElem m = e0; m < e1-1; m++)
         {
-          Edge& edge_m = g_->get_edge(m);
+          Edge const& edge_m = g_->get_edge(m);
           const int owner = g_->get_owner(edge_m.tail_);
           const GraphElem pidx = pindex_[owner];
 
@@ -265,6 +267,13 @@ class TriangulateDegreeBased
           {   
             if (stat_[pidx] == '1') // I am a `receiver` 
               continue;
+
+            if ((past_owner > -1) && (owner != past_owner))
+            {
+              sbuf_[nsdispls_[pindex_[past_owner]]+sbuf_ctr_[pindex_[past_owner]]] = -1;
+              sbuf_ctr_[pindex_[past_owner]] += 1;
+              past_owner = owner;
+            }
 
             if (c == 0)
             {
@@ -274,13 +283,9 @@ class TriangulateDegreeBased
 
             sbuf_[nsdispls_[pidx]+sbuf_ctr_[pidx]] = edge_m.tail_;
             sbuf_ctr_[pidx] += 1;
+            out_nghosts_ -= 1;
             c += 1;
           }
-        }
-        if (c > 0)
-        {
-          sbuf_[nsdispls_[pidx]+sbuf_ctr_[pidx]] = -1;
-          sbuf_ctr_[pidx] += 1;
         }
       }
 
@@ -301,12 +306,17 @@ class TriangulateDegreeBased
       { 
         source = status.MPI_SOURCE;
         MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
-        MPI_Recv(&rbuf_[rdispls_[source]], count, MPI_GRAPH_TYPE, source, 
-            TAG_DATA, comm_, MPI_STATUS_IGNORE);       
+
+        MPI_Recv(&rbuf_[nrdispls_[source]], count, MPI_GRAPH_TYPE, source, 
+            TAG_DATA, comm_, MPI_STATUS_IGNORE);      
+
+       in_nghosts_ -= count; 
       }
       else
         return;
 
+      const GraphElem lnv = g_->get_lnv();
+      
       for (GraphElem i = 0; i < lnv; i++)
       {
         GraphElem e0, e1;
@@ -317,7 +327,7 @@ class TriangulateDegreeBased
 
         for (GraphElem m = e0; m < e1-1; m++)
         {
-          Edge& edge_m = g_->get_edge(m);
+          Edge const& edge_m = g_->get_edge(m);
           const int owner = g_->get_owner(edge_m.tail_);
           const GraphElem pidx = pindex_[owner];
 
@@ -330,12 +340,12 @@ class TriangulateDegreeBased
             {  
               Edge const& edge_n = g_->get_edge(n);                                
 
-              if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
-              if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
                 continue;
 
-              check_remote_edgelist(&rbuf_[rdispls_[source]], count, edge_m.tail_, edge_n.tail_);
+              check_remote_edgelist(&rbuf_[nrdispls_[source]], count, edge_m.tail_, edge_n.tail_);
             }
           }
         }
@@ -429,28 +439,21 @@ class TriangulateDegreeBased
       MPI_Request nbar_req = MPI_REQUEST_NULL;
 #endif
 
+      // send phase
+      outgoing_edges();
+
       bool sends_done = false;
       int *inds = new int[pdegree_];
       int over = -1;
 
+      // recv phase
 #if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
 #else
         while(!done)
 #endif
         {  
-          if (out_nghosts_ == 0)
-          {
-            if (!sends_done)
-            {
-              nbsend();
-              sends_done = true;
-            }
-          }
-          else
-            lookup_edges();
-
-          process_messages();
+          incoming_edges();
 
           MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
 
@@ -496,7 +499,7 @@ class TriangulateDegreeBased
 
       free(inds);
 
-      return (ttc/3);
+      return ttc;
     }
 
   private:
