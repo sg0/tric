@@ -21,6 +21,8 @@ Please contact the following for any queries or support:
 
 Sayan Ghosh, PNNL (sg0 at pnnl dot gov)
 
+Please '*' this repository if you find this useful.
+
 *******
 Compile
 *******
@@ -60,7 +62,7 @@ Possible options (can be combined):
                       naggr := (nranks > 1) ? (nprocs/nranks) : nranks;
 7.  -o              : Estimate triangle counts - use exact counting for locally owned vertices 
                       and probabilistic estimate (see macros) for remote. 
-8.  -s <size>       : Buffer size, only relevant when -DAGGR_BUFR(_RMA) is passed for aggregate-buffered 
+8.  -s <size>       : Buffer size, only relevant when -DAGGR_<> is passed for aggregate-buffered 
                       triangle counting. Default buffer size can be set by updating DEFAULT_BUF_SIZE. 
 
 Please try the default version (no need to pass any macro in the Makefile) or the aggregate-buffered

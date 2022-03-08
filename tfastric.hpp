@@ -144,7 +144,6 @@ class TriangulateDegreeBased
       }
     }
 
-    ntriangles_ /= 3; // local counting is 3x
     MPI_Barrier(comm_);
 
     double t1 = MPI_Wtime();
@@ -168,32 +167,35 @@ class TriangulateDegreeBased
 
     stat_ = new char[pdegree_];
     sreq_ = new MPI_Request[pdegree_];
-    nsdispls_ = new GraphElem[pdegree_];
-    nrdispls_ = new GraphElem[pdegree_];
+    nsdispls_ = new GraphElem[pdegree_]();
+    nrdispls_ = new GraphElem[pdegree_]();
     sbuf_ctr_ = new GraphElem[pdegree_]();
 
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(stat_, stat_ + pdegree_, '0');
 
-    GraphElem rcount = 0, scount = 0; 
+    GraphElem rcount = 0, scount = 0, incr = 0; 
 
     for (GraphElem p = 0; p < size_; p++)
     {
       if (send_count_[p] > 0)
       {
-        if (send_count_[p] > recv_count_[p])
+        if ((incr % 2) == 0)
         {
-          in_nghosts_ += recv_count_[p];
-          stat_[targets_[p]] = '1'; // recv from targets_[p]
-          nrdispls_[targets_[p]] = rcount;
-          rcount += (recv_count_[p] + 2*vrecv_count[p]);
+          out_nghosts_ += send_count_[p];
+          stat_[pindex_[targets_[p]]] = '0'; // send to targets_[p]
+          nsdispls_[pindex_[targets_[p]]] = scount;
+          scount += (send_count_[p] + 2*vsend_count[p]);
         }
         else
         {
-          out_nghosts_ += send_count_[p];
-          nsdispls_[targets_[p]] = scount;
-          scount += (send_count_[p] + 2*vsend_count[p]);
+          in_nghosts_ += recv_count_[p];
+          stat_[pindex_[targets_[p]]] = '1'; // recv from targets_[p]
+          nrdispls_[pindex_[targets_[p]]] = rcount;
+          rcount += (recv_count_[p] + 2*vrecv_count[p]);
         }
+
+        incr += 1;
       }
     }
 
@@ -235,7 +237,7 @@ class TriangulateDegreeBased
     {
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
-        MPI_Isend(&sbuf_[nsdispls_[pindex_[owner]]], sbuf_ctr_[pindex_[owner]], 
+        MPI_Issend(&sbuf_[nsdispls_[pindex_[owner]]], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
       }
     }
@@ -306,11 +308,8 @@ class TriangulateDegreeBased
       { 
         source = status.MPI_SOURCE;
         MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
-
         MPI_Recv(&rbuf_[nrdispls_[source]], count, MPI_GRAPH_TYPE, source, 
             TAG_DATA, comm_, MPI_STATUS_IGNORE);      
-
-       in_nghosts_ -= count; 
       }
       else
         return;
@@ -337,7 +336,7 @@ class TriangulateDegreeBased
               continue;
 
             for (GraphElem n = m + 1; n < e1; n++)
-            {  
+            { 
               Edge const& edge_n = g_->get_edge(n);                                
 
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
@@ -445,6 +444,9 @@ class TriangulateDegreeBased
       // send phase
       outgoing_edges();
 
+      if (rank_ == 0)
+        std::cout << "Initial remote edges send phase completed (" << 2*out_nghosts_ << " edges sent)." << std::endl;
+
       // recv phase
 #if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
@@ -452,8 +454,6 @@ class TriangulateDegreeBased
       while(!done)
 #endif
         {
-          incoming_edges();
-
           MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
 
           if (over != MPI_UNDEFINED)
@@ -461,9 +461,12 @@ class TriangulateDegreeBased
             for (int i = 0; i < over; i++)
             {
               GraphElem idx = static_cast<GraphElem>(inds[i]);
+              sbuf_ctr_[idx] = 0;
               out_nghosts_ -= send_count_[targets_[idx]];
             }
           }
+          
+          incoming_edges();
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
           count = in_nghosts_;
@@ -479,16 +482,13 @@ class TriangulateDegreeBased
           }
           else
           {
-            if ((out_nghosts_ + in_nghosts_) == 0)
+            if (out_nghosts_ == 0)
             {
               MPI_Ibarrier(comm_, &nbar_req);
               nbar_active = true;
             }
           }
 #endif
-#if defined(DEBUG_PRINTF)
-          std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
-#endif            
         }
 
       GraphElem ttc = 0, ltc = ntriangles_;
@@ -497,7 +497,7 @@ class TriangulateDegreeBased
 
       delete []inds;
 
-      return ttc;
+      return (ttc / 3);
     }
 
   private:

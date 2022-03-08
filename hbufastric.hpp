@@ -61,7 +61,8 @@ class TriangulateAggrBufferedHeuristics
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(-1)
+      prev_k_(nullptr), stat_(nullptr), sdispls_(nullptr), targets_(0), 
+      bufsize_(bufsize), inbufsize_(0), outbufsize_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -69,6 +70,8 @@ class TriangulateAggrBufferedHeuristics
 
     GraphElem *send_count = new GraphElem[size_]();
     GraphElem *recv_count = new GraphElem[size_]();
+    GraphElem *upd_send_count = new GraphElem[size_]();
+    GraphElem *upd_recv_count = new GraphElem[size_]();
 
     const GraphElem lnv = g_->get_lnv();
     const GraphElem nv = g_->get_nv();
@@ -100,6 +103,8 @@ class TriangulateAggrBufferedHeuristics
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
+    GraphElem nkeys = 0;
+    
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
@@ -145,6 +150,8 @@ class TriangulateAggrBufferedHeuristics
           }
         }
       }
+
+      nkeys += 1;
     }
 
     MPI_Barrier(comm_);
@@ -161,33 +168,33 @@ class TriangulateAggrBufferedHeuristics
     }
 
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
-
-    for (GraphElem p = 0; p < size_; p++)
-    {
-      out_nghosts_ += send_count[p];
-      in_nghosts_ += recv_count[p];
-    }
-
-    nghosts_ = out_nghosts_ + in_nghosts_;
-
-    //TODO FIXME don't hardcode!
-    // adjust bufsize
-    bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
-    MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
-
-    if (rank_ == 0)
-      std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
-
-    free(send_count);
-    free(recv_count);
-
+    
     pdegree_ = targets_.size(); 
+    sdispls_ = new GraphElem[pdegree_];
 
     for (int i = 0; i < pdegree_; i++)
       pindex_.insert({targets_[i], static_cast<GraphElem>(i)});
 
-    rbuf_     = new GraphElem[bufsize_];
-    sbuf_     = new GraphElem[pdegree_*bufsize_];
+    for (GraphElem p = 0; p < size_; p++)
+    {
+      if (send_count[p] > 0)
+      {
+        sdispls_[pindex_[p]] = outbufsize_;
+        upd_send_count[p] = ((nkeys*2 + 2*send_count[p]) < bufsize_) ? (nkeys*2 + 2*send_count[p]) : bufsize_;
+        outbufsize_ += upd_send_count[p];
+      }
+
+      out_nghosts_ += send_count[p];
+      in_nghosts_ += recv_count[p];
+    }
+    
+    nghosts_ = out_nghosts_ + in_nghosts_;
+    
+    MPI_Alltoall(upd_send_count, 1, MPI_GRAPH_TYPE, upd_recv_count, 1, MPI_GRAPH_TYPE, comm_);
+    inbufsize_ = std::accumulate(upd_recv_count, upd_recv_count + size_, 0);
+
+    rbuf_     = new GraphElem[inbufsize_];
+    sbuf_     = new GraphElem[outbufsize_];
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
@@ -209,6 +216,11 @@ class TriangulateAggrBufferedHeuristics
         std::cout << j << ": " << erange_[i] << ", " << erange_[i+1] << std::endl;
     }
 #endif
+    
+    free(send_count);
+    free(recv_count);
+    free(upd_send_count);
+    free(upd_recv_count);
   }
 
     ~TriangulateAggrBufferedHeuristics() {}
@@ -224,6 +236,7 @@ class TriangulateAggrBufferedHeuristics
       delete []stat_;
       delete []vcount_;
       delete []erange_;
+      delete []sdispls_;
 
       pindex_.clear();
       targets_.clear();
@@ -238,7 +251,7 @@ class TriangulateAggrBufferedHeuristics
     {
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
-        MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
+        MPI_Isend(&sbuf_[sdispls_[pindex_[owner]]], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
       }
     }
@@ -276,8 +289,6 @@ class TriangulateAggrBufferedHeuristics
 
             if (m >= prev_m_[pidx])
             {
-              const GraphElem disp = pidx*bufsize_;
-
               if (sbuf_ctr_[pidx] == (bufsize_-1))
               {
                 prev_m_[pidx] = m;
@@ -289,7 +300,7 @@ class TriangulateAggrBufferedHeuristics
                 continue;
               }
 
-              sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
+              sbuf_[sdispls_[pidx]+sbuf_ctr_[pidx]] = edge.edge_->tail_;
               sbuf_ctr_[pidx] += 1;
 
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
@@ -306,7 +317,7 @@ class TriangulateAggrBufferedHeuristics
                   prev_m_[pidx] = m;
                   prev_k_[pidx] = n;
 
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
+                  sbuf_[sdispls_[pidx]+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
                   sbuf_ctr_[pidx] += 1;
                   stat_[pidx] = '1'; 
 
@@ -315,7 +326,7 @@ class TriangulateAggrBufferedHeuristics
                   break;
                 }
                               
-                sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
+                sbuf_[sdispls_[pidx]+sbuf_ctr_[pidx]] = edge_n.tail_;
                 sbuf_ctr_[pidx] += 1;
                 out_nghosts_ -= 1;
                 vcount_[i] -= 1;
@@ -330,7 +341,7 @@ class TriangulateAggrBufferedHeuristics
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_[sdispls_[pidx]+sbuf_ctr_[pidx]] = -1; 
                   sbuf_ctr_[pidx] += 1;
                   stat_[pidx] = '1';
 
@@ -338,7 +349,7 @@ class TriangulateAggrBufferedHeuristics
                 }
                 else
                 {
-                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_[sdispls_[pidx]+sbuf_ctr_[pidx]] = -1; 
                   sbuf_ctr_[pidx] += 1;
                 }
               }
@@ -522,9 +533,8 @@ class TriangulateAggrBufferedHeuristics
   private:
     Graph* g_;
 
-    GraphElem ntriangles_;
-    GraphElem bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
-    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
+    GraphElem ntriangles_, bufsize_, inbufsize_, outbufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
+    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_, *sdispls_;
     MPI_Request *sreq_;
     char *stat_;
 
