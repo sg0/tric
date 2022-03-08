@@ -277,13 +277,6 @@ void parseCommandLine(const int argc, char * const argv[])
 
   // warnings/info
 
-#if !defined(AGGR_BUFR) || !defined(AGGR_BUFR_RMA) || !defined(AGGR_HEUR) || !defined(AGGR_MAP) || !defined(AGGR_ARR)
-  if (me == 0 && bufferSet) 
-  {
-    std::cout << "Setting a buffer size using -s <...> is pointless for non-aggregate buffered versions." << std::endl;
-  } 
-#endif
-
   if (me == 0 && generateGraph && readBalanced) 
   {
     std::cout << "Balanced read (option -b) is only applicable for real-world graphs. "
