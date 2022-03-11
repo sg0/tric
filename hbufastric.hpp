@@ -47,11 +47,77 @@
 #include <cstring>
 #include <iomanip>
 #include <limits>
+#include <cmath>
+#include <vector>
+#include <stdexcept>
+#include <string> 
 
 #ifndef TAG_DATA
 #define TAG_DATA 100
 #endif
 
+#ifndef BLOOMFILTER_TOL
+#define BLOOMFILTER_TOL 1E-09
+#endif
+
+class Bloomfilter
+{
+  public:
+    Bloomfilter(GraphElem n, GraphWeight p=BLOOMFILTER_TOL) 
+      : n_(pow(2, std::ceil(log(n)/log(2)))), p_(p)
+    {
+      m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
+      k_ = std::round((m_ / n_) * log(2));
+
+      bits_.resize(m_);
+
+      if (k_ == 0)
+        throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
+    }
+
+    void insert(GraphElem const& i, GraphElem const& j)
+    {
+      for (GraphElem k = 0; k < k_; k++)
+        bits_[hash(i,j)] = true;
+    }
+
+    void print() const
+    {
+      std::cout << "-------------Bloom filter statistics-------------" << std::endl;
+      std::cout << "Number of Items (n): " << n_ << std::endl;
+      std::cout << "Probability of False Positives (p): " << p_ << std::endl;
+      std::cout << "Number of bits in filter (m): " << m_ << std::endl;
+      std::cout << "Number of hash functions (k): " << k_ << std::endl;
+      std::cout << "-------------------------------------------------" << std::endl;
+    }
+
+    void clear()
+    { bits_.clear(); }
+
+    bool contains(GraphElem const& i, GraphElem const& j) const
+    {
+      for (GraphElem k = 0; k < k_; k++)
+      {
+        if (!bits_[hash(i,j)]) 
+          return false;
+      }
+      return true;
+    }
+
+  private:
+    GraphElem n_, m_, k_;
+    GraphWeight p_;
+
+    GraphElem hash(GraphElem const& i, GraphElem const& j) const 
+    {
+      GraphElem h = 0x517cc1b7;
+      h = h * 131 + i;
+      h = h * 131 + j;
+      return (h % n_); 
+    }
+
+    std::vector<bool> bits_;
+};
 
 class TriangulateAggrBufferedHeuristics
 {
@@ -61,7 +127,7 @@ class TriangulateAggrBufferedHeuristics
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0)
+      prev_k_(nullptr), stat_(nullptr), bf_(nullptr), targets_(0), bufsize_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -75,6 +141,8 @@ class TriangulateAggrBufferedHeuristics
 
     vcount_ = new GraphElem[lnv]();
     erange_ = new GraphElem[nv*2]();
+
+    std::vector<std::array<int,2>> send_pelist, pe_edgelist;
 
     double t0 = MPI_Wtime();
 
@@ -129,19 +197,9 @@ class TriangulateAggrBufferedHeuristics
         {  
           if (std::find(targets_.begin(), targets_.end(), owner) 
               == targets_.end())
-            targets_.push_back(static_cast<GraphElem>(owner));
-
-          for (GraphElem n = m + 1; n < e1; n++)
           {
-            Edge const& edge_n = g_->get_edge(n);
-                
-            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
-              break;
-            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
-              continue;
-
-            send_count[owner] += 1;
-            vcount_[i] += 1;
+            targets_.push_back(static_cast<GraphElem>(owner));
+            send_pelist.emplace_back(std::array<int,2>({rank_, owner}));
           }
         }
       }
@@ -160,6 +218,66 @@ class TriangulateAggrBufferedHeuristics
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
 
+    // process graph allgather
+    int count = send_pelist.size()*2;
+    int totcount = 0;
+    std::vector<int> rcounts(size_,0), displs(size_,0);
+    MPI_Allreduce(&count, &totcount, 1, MPI_INT, MPI_SUM, comm_);
+    MPI_Allgather(&count, 1, MPI_INT, rcounts.data(), 1, MPI_INT, comm_);
+    int disp = 0;
+    for (int i = 0; i < size_; i++)
+    {
+      displs[i] = disp;
+      disp += rcounts[i];
+    }
+    pe_edgelist.resize(totcount/2);
+    
+    MPI_Allgatherv(send_pelist.data(), count, MPI_INT, pe_edgelist.data(),
+        rcounts.data(), displs.data(), MPI_INT, comm_);
+
+    // insert process graph coordinates into boomfilter
+    bf_ = new Bloomfilter(size_);
+
+    for(int i = 0; i < pe_edgelist.size(); i++)
+      bf_->insert(pe_edgelist[i][0], pe_edgelist[i][1]);
+
+    if (rank_ == 0)
+      bf_->print();
+    
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+      g_->edge_range(i, e0, e1);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        EdgeStat& edge_m = g_->get_edge_stat(m);
+        const int owner = g_->get_owner(edge_m.edge_->tail_);
+
+        if (owner != rank_)
+        {  
+          for (GraphElem n = m + 1; n < e1; n++)
+          {
+            Edge const& edge_n = g_->get_edge(n);
+                
+            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+              break;
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+              continue;
+            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
+              continue;
+
+            send_count[owner] += 1;
+            vcount_[i] += 1;
+          }
+        }
+      }
+    }
+
+    // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
     
     pdegree_ = targets_.size(); 
@@ -207,12 +325,19 @@ class TriangulateAggrBufferedHeuristics
     
     free(send_count);
     free(recv_count);
+
+    send_pelist.clear();
+    pe_edgelist.clear();
+    rcounts.clear();
+    displs.clear();
   }
 
     ~TriangulateAggrBufferedHeuristics() {}
 
     void clear()
     {
+      bf_->clear();
+
       delete []sbuf_;
       delete []rbuf_;
       delete []sbuf_ctr_;
@@ -222,14 +347,18 @@ class TriangulateAggrBufferedHeuristics
       delete []stat_;
       delete []vcount_;
       delete []erange_;
+      delete []bf_;
 
       pindex_.clear();
       targets_.clear();
     }
 
-    // TODO
-    inline void check()
+    // x/y are processes
+    inline bool is_connected_pes(GraphElem const& x, GraphElem const& y)
     {
+      if ((x == y) || bf_->contains(x,y))
+        return true;
+      return false;
     }
 
     void nbsend(GraphElem owner)
@@ -296,6 +425,8 @@ class TriangulateAggrBufferedHeuristics
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
+                  continue;
+                if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
                   continue;
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
@@ -523,11 +654,12 @@ class TriangulateAggrBufferedHeuristics
     GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_;
     char *stat_;
+    Bloomfilter *bf_;
 
     std::vector<GraphElem> targets_;
 
     int rank_, size_;
-    std::unordered_map<GraphElem, GraphElem> pindex_; 
+    std::unordered_map<GraphElem, GraphElem> pindex_, pnbr_map_; 
     MPI_Comm comm_;
 };
 #endif
