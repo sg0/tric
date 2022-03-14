@@ -60,6 +60,8 @@
 #define BLOOMFILTER_TOL 1E-09
 #endif
 
+#include "murmurhash/MurmurHash3.h"
+
 class Bloomfilter
 {
   public:
@@ -69,7 +71,25 @@ class Bloomfilter
       m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
       k_ = std::round((m_ / n_) * log(2));
 
+      hashes_.resize(k_); 
       bits_.resize(m_);
+      std::fill(bits_.begin(), bits_.end(), false);
+
+      if (k_ == 0)
+        throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
+    }
+        
+    Bloomfilter(GraphElem n, GraphElem k, GraphWeight p=BLOOMFILTER_TOL) 
+      : n_(pow(2, std::ceil(log(n)/log(2)))), k_(k), p_(p)
+    {
+      m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
+
+      if (k_%2 != 0)
+        k_ += 1;
+
+      hashes_.resize(k_); 
+      bits_.resize(m_);
+      std::fill(bits_.begin(), bits_.end(), false);
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
@@ -77,8 +97,9 @@ class Bloomfilter
 
     void insert(GraphElem const& i, GraphElem const& j)
     {
+      hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
-        bits_[hash(i,j)] = true;
+        bits_[hashes_[k]] = true;
     }
 
     void print() const
@@ -92,13 +113,17 @@ class Bloomfilter
     }
 
     void clear()
-    { bits_.clear(); }
+    { 
+      bits_.clear(); 
+      hashes_.clear(); 
+    }
 
-    bool contains(GraphElem const& i, GraphElem const& j) const
+    bool contains(GraphElem i, GraphElem j) 
     {
+      hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
       {
-        if (!bits_[hash(i,j)]) 
+        if (!bits_[hashes_[k]]) 
           return false;
       }
       return true;
@@ -108,15 +133,18 @@ class Bloomfilter
     GraphElem n_, m_, k_;
     GraphWeight p_;
 
-    GraphElem hash(GraphElem const& i, GraphElem const& j) const 
+    void hash( uint64_t lhs, uint64_t rhs ) 
     {
-      GraphElem h = 0x517cc1b7;
-      h = h * 131 + i;
-      h = h * 131 + j;
-      return (h % n_); 
+      uint64_t key[2] = {lhs, rhs};
+      for (uint64_t n = 0; n < k_/2; n++)
+      {
+        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), n, &hashes_[n*2] );
+        hashes_[n*2] = hashes_[n*2] % m_; 
+        hashes_[n*2+1] = hashes_[n*2+1] % m_;
+      }
     }
-
     std::vector<bool> bits_;
+    std::vector<uint64_t> hashes_;
 };
 
 class TriangulateAggrBufferedHeuristics
@@ -236,7 +264,7 @@ class TriangulateAggrBufferedHeuristics
         rcounts.data(), displs.data(), MPI_INT, comm_);
 
     // insert process graph coordinates into boomfilter
-    bf_ = new Bloomfilter(size_);
+    bf_ = new Bloomfilter(totcount);
 
     for(int i = 0; i < pe_edgelist.size(); i++)
       bf_->insert(pe_edgelist[i][0], pe_edgelist[i][1]);
@@ -347,7 +375,7 @@ class TriangulateAggrBufferedHeuristics
       delete []stat_;
       delete []vcount_;
       delete []erange_;
-      delete []bf_;
+      delete bf_;
 
       pindex_.clear();
       targets_.clear();
