@@ -69,8 +69,8 @@
 #include "rmabufastric.hpp"
 #elif defined(AGGR_HEUR) // comm-avoiding heuristics
 #include "hbufastric.hpp"
-#elif defined(DEG_COMM) // degree-based communication
-#include "tfastric.hpp"
+#elif defined(HASH_COMM) // hash-based communication
+#include "hashfastric.hpp"
 #elif defined(AGGR_MAP) // aggregate buffered + heuristics using map
 #include "mbufastric.hpp"
 #elif defined(STM8_ONESIDED)
@@ -180,8 +180,8 @@ int main(int argc, char *argv[])
   TriangulateAggrFatBatch tr(g);
 #elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
   TriangulateEstimate tr(g);
-#elif defined(DEG_COMM)
-  TriangulateDegreeBased tr(g);
+#elif defined(HASH_COMM)
+  TriangulateHashBased tr(g);
 #elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) 
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
