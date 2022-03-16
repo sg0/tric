@@ -130,11 +130,11 @@ class Bloomfilter
 
     // "nucular" options, use iff 
     // you know what you're doing
-    void copy_from(char* newbits)
-    { std::copy(newbits, newbits + m_, bits_.begin()); }
-    
+    void copy_from(const char* newbits)
+    { std::memcpy(bits_.data(), newbits, m_); }
+      
     void copy_to(char* newbits)
-    { std::copy(bits_.begin(), bits_.end(), newbits); }
+    { std::memcpy(newbits, bits_.data(), m_); }
 
   private:
     GraphElem n_, m_, k_;
@@ -143,13 +143,14 @@ class Bloomfilter
     void hash( uint64_t lhs, uint64_t rhs ) 
     {
       uint64_t key[2] = {lhs, rhs};
-      for (uint64_t n = 0; n < k_/2; n++)
+      for (uint64_t n = 0; n < k_; n+=2)
       {
-        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), n, &hashes_[n*2] );
-        hashes_[n*2] = hashes_[n*2] % m_; 
-        hashes_[n*2+1] = hashes_[n*2+1] % m_;
+        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), n, &hashes_[n] );
+        hashes_[n] = hashes_[n] % m_; 
+        hashes_[n+1] = hashes_[n+1] % m_;
       }
     }
+    
     std::vector<char> bits_;
     std::vector<uint64_t> hashes_;
 };
@@ -165,9 +166,6 @@ class TriangulateHashBased
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
     MPI_Comm_rank(comm_, &rank_);
-
-    GraphElem *send_count  = new GraphElem[size_]();
-    GraphElem *recv_count  = new GraphElem[size_]();
 
     double t0 = MPI_Wtime();
     
@@ -202,8 +200,6 @@ class TriangulateHashBased
           if (std::find(targets_.begin(), targets_.end(), owner) 
               == targets_.end()) 
             targets_.push_back(owner);
-
-          send_count[owner] += 1;
         }
       }
     }
@@ -220,9 +216,7 @@ class TriangulateHashBased
       std::cout << "Average time for local counting during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
-
-    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
-            
+ 
     MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
         MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
         MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
@@ -241,20 +235,75 @@ class TriangulateHashBased
     
     sbf_ = new Bloomfilter*[pdegree_];
     rbf_ = new Bloomfilter*[pdegree_];
-
+    
     t0 = MPI_Wtime();
     
     std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_), rcounts(pdegree_);
+    std::vector<int> source_counts(pdegree_);
+    GraphElem *send_count  = new GraphElem[pdegree_]();
+    GraphElem *recv_count  = new GraphElem[pdegree_]();
+
+    const GraphElem targets_size = targets_.size();
+    MPI_Neighbor_allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, gcomm_);
+    
     GraphElem sdisp = 0, rdisp = 0;
 
     for (GraphElem p = 0; p < pdegree_; p++)
     {
-      sbf_[p] = new Bloomfilter(send_count[targets_[p]]);
+      rdispls[p] = rdisp;;
+      rdisp += source_counts[p];
+    }
+    
+    std::vector<int> source_data(rdisp);
+
+    MPI_Neighbor_allgatherv(targets_.data(), targets_.size(), MPI_INT, source_data.data(), 
+        source_counts.data(), rdispls.data(), MPI_INT, gcomm_);
+
+    // TODO FIXME overallocation & multiple
+    // insertions (wasted cycles), unique 
+    // neighbors + 1 is ideal
+    pbf_ = new Bloomfilter(rdisp);
+
+    for (int p = 0; p < rdisp; p++)
+    {
+      if (rank_ != source_data[p])
+        pbf_->insert(rank_, source_data[p]);
+    }
+    
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+      g_->edge_range(i, e0, e1);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
+
+        if (owner != rank_)
+        { 
+          if (pbf_->contains(rank_, owner))
+            send_count[pindex_[owner]] += 1;
+        }
+      }
+    }
+    
+    MPI_Neighbor_alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, gcomm_);
+ 
+    sdisp = 0;
+    rdisp = 0;
+
+    for (GraphElem p = 0; p < pdegree_; p++)
+    {
+      sbf_[p] = new Bloomfilter(send_count[p]);
       sdispls[p] = sdisp;
       scounts[p] = sbf_[p]->nbits();
       sdisp += scounts[p];
 
-      rbf_[p] = new Bloomfilter(recv_count[targets_[p]]);
+      rbf_[p] = new Bloomfilter(recv_count[p]);
       rdispls[p] = rdisp;
       rcounts[p] = rbf_[p]->nbits();
       rdisp += rcounts[p];
@@ -275,8 +324,9 @@ class TriangulateHashBased
         const int owner = g_->get_owner(edge_m.tail_);
 
         if (owner != rank_)
-        {  
-          sbf_[pindex_[owner]]->insert(edge_m.tail_, g_->local_to_global(i));
+        {
+          if (pbf_->contains(rank_, owner))
+            sbf_[pindex_[owner]]->insert(edge_m.tail_, g_->local_to_global(i));
         }
       }
     }
@@ -325,6 +375,8 @@ class TriangulateHashBased
     rcounts.clear();
     sdispls.clear();
     rdispls.clear();
+    source_counts.clear();
+    source_data.clear();
   }
 
     ~TriangulateHashBased() {}
@@ -340,6 +392,8 @@ class TriangulateHashBased
         sbf_[p]->clear();
       }
 
+      pbf_->clear();
+
       delete []rbf_;
       delete []sbf_;
     }
@@ -347,6 +401,8 @@ class TriangulateHashBased
     inline GraphElem count()
     {
       const GraphElem lnv = g_->get_lnv();
+      GraphElem rtriangles = 0;
+
       for (GraphElem i = 0; i < lnv; i++)
       {
         GraphElem e0, e1;
@@ -366,18 +422,18 @@ class TriangulateHashBased
             for (GraphElem n = m + 1; n < e1; n++)
             { 
               Edge const& edge_n = g_->get_edge(n);                                
-              if (rbf_[pindex_[owner]]->contains(edge_m.tail_, edge_n.tail_))
-                ntriangles_ += 1;
+              if (rbf_[pidx]->contains(edge_m.tail_, edge_n.tail_))
+                rtriangles += 1;
             }
           }
         }
       }
       
-      GraphElem ttc = 0, ltc = ntriangles_;
+      GraphElem ttc[2] = {0,0}, ltc[2] = {ntriangles_, rtriangles};
       MPI_Barrier(comm_);
-      MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
+      MPI_Reduce(ltc, ttc, 2, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
-      return (ttc / 3);
+      return (ttc[0] / 3) + (ttc[1] / 2);
     }
 
     inline bool check_edgelist(GraphElem tup[2])
@@ -398,7 +454,7 @@ class TriangulateHashBased
 
   private:
     Graph* g_;
-    Bloomfilter **rbf_, **sbf_;
+    Bloomfilter **rbf_, **sbf_, *pbf_;
 
     GraphElem ntriangles_, pdegree_;
     char *sbuf_, *rbuf_; 

@@ -136,11 +136,11 @@ class Bloomfilter
     void hash( uint64_t lhs, uint64_t rhs ) 
     {
       uint64_t key[2] = {lhs, rhs};
-      for (uint64_t n = 0; n < k_/2; n++)
+      for (uint64_t n = 0; n < k_; n+=2)
       {
-        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), n, &hashes_[n*2] );
-        hashes_[n*2] = hashes_[n*2] % m_; 
-        hashes_[n*2+1] = hashes_[n*2+1] % m_;
+        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), n, &hashes_[n] );
+        hashes_[n] = hashes_[n] % m_; 
+        hashes_[n+1] = hashes_[n+1] % m_;
       }
     }
     std::vector<bool> bits_;
