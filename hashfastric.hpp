@@ -160,7 +160,7 @@ class TriangulateHashBased
   public:
 
     TriangulateHashBased(Graph* g): 
-      g_(g), sbf_(nullptr), rbf_(nullptr),  pdegree_(0), ntriangles_(0), 
+      g_(g), sbf_(nullptr), rbf_(nullptr), pbf_(nullptr), pdegree_(0), ntriangles_(0), 
       targets_(0), gcomm_(MPI_COMM_NULL)
   {
     comm_ = g_->get_comm();
@@ -216,167 +216,170 @@ class TriangulateHashBased
       std::cout << "Average time for local counting during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
- 
-    MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
-        MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
-        MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
 
-    // double-checking indegree/outdegree
-    int weighted, indegree, outdegree;
-    MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
-    assert(indegree == targets_.size());
-    assert(outdegree == targets_.size());
-    assert(indegree == outdegree);
-
-    pdegree_ = indegree; // for undirected graph, indegree == outdegree
-
-    for (int i = 0; i < pdegree_; i++)
-      pindex_.insert({targets_[i], i});
-    
-    sbf_ = new Bloomfilter*[pdegree_];
-    rbf_ = new Bloomfilter*[pdegree_];
-    
-    t0 = MPI_Wtime();
-    
-    std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_, 0), rcounts(pdegree_, 0);
-    std::vector<int> source_counts(pdegree_, 0);
-    GraphElem *send_count  = new GraphElem[pdegree_]();
-    GraphElem *recv_count  = new GraphElem[pdegree_]();
-
-    const int targets_size = targets_.size();
-    MPI_Neighbor_allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, gcomm_);
-     
-    int sdisp = 0, rdisp = 0;
-
-    for (GraphElem p = 0; p < pdegree_; p++)
+    if (size_ > 1)
     {
-      rdispls[p] = rdisp;
-      rdisp += source_counts[p];
-    }
-    
-    std::vector<int> source_data(rdisp, 0);
+      MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
+          MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
+          MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
 
-    MPI_Neighbor_allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
-        source_counts.data(), rdispls.data(), MPI_INT, gcomm_);
-    
-    // TODO FIXME overallocation & multiple
-    // insertions (wasted cycles), unique 
-    // neighbors + 1 is ideal
-    pbf_ = new Bloomfilter(rdisp);
+      // double-checking indegree/outdegree
+      int weighted, indegree, outdegree;
+      MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
+      assert(indegree == targets_.size());
+      assert(outdegree == targets_.size());
+      assert(indegree == outdegree);
 
-    for (int p = 0; p < rdisp; p++)
-    {
-      if (rank_ != source_data[p])
-        pbf_->insert(rank_, source_data[p]);
-    }
-    
-    for (GraphElem i = 0; i < lnv; i++)
-    {
-      GraphElem e0, e1, tup[2];
-      g_->edge_range(i, e0, e1);
+      pdegree_ = indegree; // for undirected graph, indegree == outdegree
 
-      if ((e0 + 1) == e1)
-        continue;
+      for (int i = 0; i < pdegree_; i++)
+        pindex_.insert({targets_[i], i});
 
-      for (GraphElem m = e0; m < e1; m++)
+      sbf_ = new Bloomfilter*[pdegree_];
+      rbf_ = new Bloomfilter*[pdegree_];
+
+      t0 = MPI_Wtime();
+
+      std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_, 0), rcounts(pdegree_, 0);
+      std::vector<int> source_counts(pdegree_, 0);
+      GraphElem *send_count  = new GraphElem[pdegree_]();
+      GraphElem *recv_count  = new GraphElem[pdegree_]();
+
+      const int targets_size = targets_.size();
+      MPI_Neighbor_allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, gcomm_);
+
+      int sdisp = 0, rdisp = 0;
+
+      for (GraphElem p = 0; p < pdegree_; p++)
       {
-        Edge const& edge_m = g_->get_edge(m);
-        const int owner = g_->get_owner(edge_m.tail_);
-
-        if (owner != rank_)
-        { 
-          if (pbf_->contains(rank_, owner))
-            send_count[pindex_[owner]] += 1;
-        }
+        rdispls[p] = rdisp;
+        rdisp += source_counts[p];
       }
-    }
-     
-    MPI_Neighbor_alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, gcomm_);
- 
-    sdisp = 0;
-    rdisp = 0;
 
-    for (GraphElem p = 0; p < pdegree_; p++)
-    {
-      sbf_[p] = new Bloomfilter(send_count[p]);
-      sdispls[p] = sdisp;
-      scounts[p] = sbf_[p]->nbits();
-      sdisp += scounts[p];
-      
-      rbf_[p] = new Bloomfilter(recv_count[p]);
-      rdispls[p] = rdisp;
-      rcounts[p] = rbf_[p]->nbits();
-      rdisp += rcounts[p];
-    }
+      std::vector<int> source_data(rdisp, 0);
 
-    // store remote edges in bloomfilter and communicate 
-    for (GraphElem i = 0; i < lnv; i++)
-    {
-      GraphElem e0, e1, tup[2];
-      g_->edge_range(i, e0, e1);
+      MPI_Neighbor_allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
+          source_counts.data(), rdispls.data(), MPI_INT, gcomm_);
 
-      if ((e0 + 1) == e1)
-        continue;
+      // TODO FIXME overallocation & multiple
+      // insertions (wasted cycles), unique 
+      // neighbors + 1 is ideal
+      pbf_ = new Bloomfilter(rdisp);
 
-      for (GraphElem m = e0; m < e1; m++)
+      for (int p = 0; p < rdisp; p++)
       {
-        Edge const& edge_m = g_->get_edge(m);
-        const int owner = g_->get_owner(edge_m.tail_);
+        if (rank_ != source_data[p])
+          pbf_->insert(rank_, source_data[p]);
+      }
 
-        if (owner != rank_)
+      for (GraphElem i = 0; i < lnv; i++)
+      {
+        GraphElem e0, e1, tup[2];
+        g_->edge_range(i, e0, e1);
+
+        if ((e0 + 1) == e1)
+          continue;
+
+        for (GraphElem m = e0; m < e1; m++)
         {
-          if (pbf_->contains(rank_, owner))
-            sbf_[pindex_[owner]]->insert(edge_m.tail_, g_->local_to_global(i));
+          Edge const& edge_m = g_->get_edge(m);
+          const int owner = g_->get_owner(edge_m.tail_);
+
+          if (owner != rank_)
+          { 
+            if (pbf_->contains(rank_, owner))
+              send_count[pindex_[owner]] += 1;
+          }
         }
       }
+
+      MPI_Neighbor_alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, gcomm_);
+
+      sdisp = 0;
+      rdisp = 0;
+
+      for (GraphElem p = 0; p < pdegree_; p++)
+      {
+        sbf_[p] = new Bloomfilter(send_count[p]);
+        sdispls[p] = sdisp;
+        scounts[p] = sbf_[p]->nbits();
+        sdisp += scounts[p];
+
+        rbf_[p] = new Bloomfilter(recv_count[p]);
+        rdispls[p] = rdisp;
+        rcounts[p] = rbf_[p]->nbits();
+        rdisp += rcounts[p];
+      }
+
+      // store remote edges in bloomfilter and communicate 
+      for (GraphElem i = 0; i < lnv; i++)
+      {
+        GraphElem e0, e1, tup[2];
+        g_->edge_range(i, e0, e1);
+
+        if ((e0 + 1) == e1)
+          continue;
+
+        for (GraphElem m = e0; m < e1; m++)
+        {
+          Edge const& edge_m = g_->get_edge(m);
+          const int owner = g_->get_owner(edge_m.tail_);
+
+          if (owner != rank_)
+          {
+            if (pbf_->contains(rank_, owner))
+              sbf_[pindex_[owner]]->insert(edge_m.tail_, g_->local_to_global(i));
+          }
+        }
+      }
+
+      MPI_Barrier(comm_);
+
+      char *sbuf = new char[sdisp];
+      char *rbuf = new char[rdisp];
+      GraphElem c = 0;
+
+      for(GraphElem p = 0; p < pdegree_; p++)
+      {
+        sbf_[p]->copy_from(&sbuf[c]);
+        c += sbf_[p]->nbits();
+      }
+
+      MPI_Neighbor_alltoallv(sbuf, scounts.data(), sdispls.data(), 
+          MPI_CHAR, rbuf, rcounts.data(), rdispls.data(), MPI_CHAR, gcomm_);   
+
+      c = 0;
+      for(GraphElem p = 0; p < pdegree_; p++)
+      {
+        rbf_[p]->copy_to(&rbuf[c]);
+        c += rbf_[p]->nbits();
+      }
+
+      t1 = MPI_Wtime();
+      p_tot = t1 - t0, t_tot = 0.0;
+
+      MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
+
+      if (rank_ == 0) 
+      {   
+        std::cout << "Average time for inserting and exchanging bloomfilter bits (secs.): " 
+          << ((double)(t_tot / (double)size_)) << std::endl;
+      }
+
+      delete []send_count;
+      delete []recv_count;
+      delete []sbuf;
+      delete []rbuf;
+
+      sdispls.clear();
+      rdispls.clear();
+      scounts.clear();
+      rcounts.clear();
+      sdispls.clear();
+      rdispls.clear();
+      source_counts.clear();
+      source_data.clear();
     }
-            
-    MPI_Barrier(comm_);
-    
-    char *sbuf = new char[sdisp];
-    char *rbuf = new char[rdisp];
-    GraphElem c = 0;
-
-    for(GraphElem p = 0; p < pdegree_; p++)
-    {
-      sbf_[p]->copy_from(&sbuf[c]);
-      c += sbf_[p]->nbits();
-    }
-
-    MPI_Neighbor_alltoallv(sbuf, scounts.data(), sdispls.data(), 
-        MPI_CHAR, rbuf, rcounts.data(), rdispls.data(), MPI_CHAR, gcomm_);   
-    
-    c = 0;
-    for(GraphElem p = 0; p < pdegree_; p++)
-    {
-      rbf_[p]->copy_to(&rbuf[c]);
-      c += rbf_[p]->nbits();
-    }
-          
-    t1 = MPI_Wtime();
-    p_tot = t1 - t0, t_tot = 0.0;
-
-    MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
-
-    if (rank_ == 0) 
-    {   
-      std::cout << "Average time for inserting and exchanging bloomfilter bits (secs.): " 
-        << ((double)(t_tot / (double)size_)) << std::endl;
-    }
-
-    delete []send_count;
-    delete []recv_count;
-    delete []sbuf;
-    delete []rbuf;
-    
-    sdispls.clear();
-    rdispls.clear();
-    scounts.clear();
-    rcounts.clear();
-    sdispls.clear();
-    rdispls.clear();
-    source_counts.clear();
-    source_data.clear();
   }
 
     ~TriangulateHashBased() {}
@@ -392,7 +395,8 @@ class TriangulateHashBased
         sbf_[p]->clear();
       }
 
-      pbf_->clear();
+      if (pbf_)
+        pbf_->clear();
 
       delete []rbf_;
       delete []sbf_;
