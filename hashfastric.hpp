@@ -238,27 +238,27 @@ class TriangulateHashBased
     
     t0 = MPI_Wtime();
     
-    std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_), rcounts(pdegree_);
-    std::vector<int> source_counts(pdegree_);
+    std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_, 0), rcounts(pdegree_, 0);
+    std::vector<int> source_counts(pdegree_, 0);
     GraphElem *send_count  = new GraphElem[pdegree_]();
     GraphElem *recv_count  = new GraphElem[pdegree_]();
 
-    const GraphElem targets_size = targets_.size();
+    const int targets_size = targets_.size();
     MPI_Neighbor_allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, gcomm_);
-    
-    GraphElem sdisp = 0, rdisp = 0;
+     
+    int sdisp = 0, rdisp = 0;
 
     for (GraphElem p = 0; p < pdegree_; p++)
     {
-      rdispls[p] = rdisp;;
+      rdispls[p] = rdisp;
       rdisp += source_counts[p];
     }
     
-    std::vector<int> source_data(rdisp);
+    std::vector<int> source_data(rdisp, 0);
 
-    MPI_Neighbor_allgatherv(targets_.data(), targets_.size(), MPI_INT, source_data.data(), 
+    MPI_Neighbor_allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
         source_counts.data(), rdispls.data(), MPI_INT, gcomm_);
-
+    
     // TODO FIXME overallocation & multiple
     // insertions (wasted cycles), unique 
     // neighbors + 1 is ideal
@@ -290,7 +290,7 @@ class TriangulateHashBased
         }
       }
     }
-    
+     
     MPI_Neighbor_alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, gcomm_);
  
     sdisp = 0;
@@ -302,7 +302,7 @@ class TriangulateHashBased
       sdispls[p] = sdisp;
       scounts[p] = sbf_[p]->nbits();
       sdisp += scounts[p];
-
+      
       rbf_[p] = new Bloomfilter(recv_count[p]);
       rdispls[p] = rdisp;
       rcounts[p] = rbf_[p]->nbits();
