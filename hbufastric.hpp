@@ -79,7 +79,7 @@ class Bloomfilter
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
     }
         
-    Bloomfilter(GraphElem n, GraphElem k, GraphWeight p=BLOOMFILTER_TOL) 
+    Bloomfilter(GraphElem n, GraphElem k, GraphWeight p) 
       : n_(pow(2, std::ceil(log(n)/log(2)))), k_(k), p_(p)
     {
       m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
@@ -161,16 +161,11 @@ class TriangulateAggrBufferedHeuristics
     MPI_Comm_size(comm_, &size_);
     MPI_Comm_rank(comm_, &rank_);
 
-    GraphElem *send_count = new GraphElem[size_]();
-    GraphElem *recv_count = new GraphElem[size_]();
-
     const GraphElem lnv = g_->get_lnv();
     const GraphElem nv = g_->get_nv();
 
     vcount_ = new GraphElem[lnv]();
     erange_ = new GraphElem[nv*2]();
-
-    std::vector<std::array<int,2>> send_pelist, pe_edgelist;
 
     double t0 = MPI_Wtime();
 
@@ -225,10 +220,7 @@ class TriangulateAggrBufferedHeuristics
         {  
           if (std::find(targets_.begin(), targets_.end(), owner) 
               == targets_.end())
-          {
-            targets_.push_back(static_cast<GraphElem>(owner));
-            send_pelist.emplace_back(std::array<int,2>({rank_, owner}));
-          }
+            targets_.push_back(owner);
         }
       }
     }
@@ -246,32 +238,51 @@ class TriangulateAggrBufferedHeuristics
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
 
-    // process graph allgather
-    int count = send_pelist.size()*2;
-    int totcount = 0;
-    std::vector<int> rcounts(size_,0), displs(size_,0);
-    MPI_Allreduce(&count, &totcount, 1, MPI_INT, MPI_SUM, comm_);
-    MPI_Allgather(&count, 1, MPI_INT, rcounts.data(), 1, MPI_INT, comm_);
-    int disp = 0;
-    for (int i = 0; i < size_; i++)
+    pdegree_ = targets_.size();
+
+    for (int i = 0; i < pdegree_; i++)
+      pindex_.insert({targets_[i], i});
+    
+    t0 = MPI_Wtime();
+
+    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_, 0), rcounts(size_, 0);
+    std::vector<int> source_counts(size_, 0);
+    GraphElem *send_count  = new GraphElem[size_]();
+    GraphElem *recv_count  = new GraphElem[size_]();
+
+    MPI_Barrier(comm_);
+    
+    const int targets_size = targets_.size();
+    MPI_Allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, comm_);
+
+    int sdisp = 0, rdisp = 0;
+
+    for (int p = 0; p < size_; p++)
     {
-      displs[i] = disp;
-      disp += rcounts[i];
+      rdispls[p] = rdisp;
+      rdisp += source_counts[p];
     }
-    pe_edgelist.resize(totcount/2);
-    
-    MPI_Allgatherv(send_pelist.data(), count, MPI_INT, pe_edgelist.data(),
-        rcounts.data(), displs.data(), MPI_INT, comm_);
 
-    // insert process graph coordinates into boomfilter
-    bf_ = new Bloomfilter(totcount);
+    std::vector<int> source_data(rdisp, 0);
 
-    for(int i = 0; i < pe_edgelist.size(); i++)
-      bf_->insert(pe_edgelist[i][0], pe_edgelist[i][1]);
+    MPI_Allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
+        source_counts.data(), rdispls.data(), MPI_INT, comm_);
 
-    if (rank_ == 0)
-      bf_->print();
-    
+    // TODO FIXME overallocation & multiple
+    // insertions (wasted cycles), unique 
+    // neighbors + 1 is ideal
+    int bf_size = (rdisp*size_);
+    bf_ = new Bloomfilter(bf_size);
+
+    for (int p = 0; p < size_; p++)
+    {
+      if (source_counts[p] > 0)
+      {
+        for (int n = 0; n < source_counts[p]; n++)
+            bf_->insert(p, source_data[n + rdispls[p]]);
+      }
+    }
+
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
@@ -290,14 +301,14 @@ class TriangulateAggrBufferedHeuristics
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
-                
+                            
             if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
               break;
-            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
-              continue;
             if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
               continue;
-
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+              continue;
+            
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
@@ -308,11 +319,6 @@ class TriangulateAggrBufferedHeuristics
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
     
-    pdegree_ = targets_.size(); 
-
-    for (int i = 0; i < pdegree_; i++)
-      pindex_.insert({targets_[i], static_cast<GraphElem>(i)});
-
     for (GraphElem p = 0; p < size_; p++)
     {
       out_nghosts_ += send_count[p];
@@ -351,13 +357,17 @@ class TriangulateAggrBufferedHeuristics
     }
 #endif
     
-    free(send_count);
-    free(recv_count);
+    delete []send_count;
+    delete []recv_count;
 
-    send_pelist.clear();
-    pe_edgelist.clear();
+    sdispls.clear();
+    rdispls.clear();
+    scounts.clear();
     rcounts.clear();
-    displs.clear();
+    sdispls.clear();
+    rdispls.clear();
+    source_counts.clear();
+    source_data.clear();
   }
 
     ~TriangulateAggrBufferedHeuristics() {}
@@ -449,12 +459,12 @@ class TriangulateAggrBufferedHeuristics
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
               {  
                 Edge const& edge_n = g_->get_edge(n);                                
-                
+                                
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
-                  continue;
                 if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
+                  continue;
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
@@ -684,10 +694,10 @@ class TriangulateAggrBufferedHeuristics
     char *stat_;
     Bloomfilter *bf_;
 
-    std::vector<GraphElem> targets_;
+    std::vector<int> targets_;
 
     int rank_, size_;
-    std::unordered_map<GraphElem, GraphElem> pindex_, pnbr_map_; 
+    std::unordered_map<int, int> pindex_; 
     MPI_Comm comm_;
 };
 #endif

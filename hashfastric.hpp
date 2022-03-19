@@ -130,11 +130,11 @@ class Bloomfilter
 
     // "nucular" options, use iff 
     // you know what you're doing
-    void copy_from(const char* newbits)
-    { std::memcpy(bits_.data(), newbits, m_); }
+    void copy_from(char* source)
+    { std::memcpy(bits_.data(), source, m_); }
       
-    void copy_to(char* newbits)
-    { std::memcpy(newbits, bits_.data(), m_); }
+    void copy_to(char* dest)
+    { std::memcpy(dest, bits_.data(), m_); }
 
   private:
     GraphElem n_, m_, k_;
@@ -260,18 +260,22 @@ class TriangulateHashBased
 
       MPI_Neighbor_allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
           source_counts.data(), rdispls.data(), MPI_INT, gcomm_);
-
+      
       // TODO FIXME overallocation & multiple
       // insertions (wasted cycles), unique 
       // neighbors + 1 is ideal
       pbf_ = new Bloomfilter(rdisp);
 
-      for (int p = 0; p < rdisp; p++)
+      for (int p = 0; p < pdegree_; p++)
       {
-        if (rank_ != source_data[p])
-          pbf_->insert(rank_, source_data[p]);
+        for (int n = 0; n < rdisp; n+=source_counts[p])
+        {
+          if (rank_ != source_data[n])
+            pbf_->insert(targets_[p], source_data[n]);
+        }
       }
 
+      // TODO FIXME this is wrong, send_count
       for (GraphElem i = 0; i < lnv; i++)
       {
         GraphElem e0, e1, tup[2];
@@ -341,7 +345,7 @@ class TriangulateHashBased
 
       for(GraphElem p = 0; p < pdegree_; p++)
       {
-        sbf_[p]->copy_from(&sbuf[c]);
+        sbf_[p]->copy_to(&sbuf[c]);
         c += sbf_[p]->nbits();
       }
 
@@ -351,7 +355,7 @@ class TriangulateHashBased
       c = 0;
       for(GraphElem p = 0; p < pdegree_; p++)
       {
-        rbf_[p]->copy_to(&rbuf[c]);
+        rbf_[p]->copy_from(&rbuf[c]);
         c += rbf_[p]->nbits();
       }
 
@@ -386,6 +390,8 @@ class TriangulateHashBased
 
     void clear()
     {
+      MPI_Comm_free(&gcomm_);
+      
       pindex_.clear();
       targets_.clear();
 
@@ -423,11 +429,14 @@ class TriangulateHashBased
 
           if (owner != rank_)
           {   
-            for (GraphElem n = m + 1; n < e1; n++)
-            { 
-              Edge const& edge_n = g_->get_edge(n);                                
-              if (rbf_[pidx]->contains(edge_m.tail_, edge_n.tail_))
-                rtriangles += 1;
+            if (pbf_->contains(rank_, owner))
+            {
+              for (GraphElem n = m + 1; n < e1; n++)
+              { 
+                Edge const& edge_n = g_->get_edge(n);                                
+                if (rbf_[pidx]->contains(edge_m.tail_, edge_n.tail_))
+                  rtriangles += 1;
+              }
             }
           }
         }
