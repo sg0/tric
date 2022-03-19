@@ -272,7 +272,7 @@ class TriangulateAggrBufferedHeuristics
     // insertions (wasted cycles), unique 
     // neighbors + 1 is ideal
     int bf_size = (rdisp*size_);
-    bf_ = new Bloomfilter(bf_size);
+    bf_ = new Bloomfilter(bf_size, 10, 1.0E-6);
 
     for (int p = 0; p < size_; p++)
     {
@@ -304,11 +304,11 @@ class TriangulateAggrBufferedHeuristics
                             
             if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
               break;
-            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
-              continue;
             if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
               continue;
-            
+            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
+              continue;
+           
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
@@ -462,9 +462,9 @@ class TriangulateAggrBufferedHeuristics
                                 
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
-                if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
-                  continue;
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
+                  continue;
+                if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
                   continue;
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
