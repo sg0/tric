@@ -271,8 +271,7 @@ class TriangulateAggrBufferedHeuristics
     // TODO FIXME overallocation & multiple
     // insertions (wasted cycles), unique 
     // neighbors + 1 is ideal
-    int bf_size = (rdisp*size_);
-    bf_ = new Bloomfilter(bf_size, 10, 1.0E-6);
+    bf_ = new Bloomfilter(rdisp*size_);
 
     for (int p = 0; p < size_; p++)
     {
@@ -394,7 +393,7 @@ class TriangulateAggrBufferedHeuristics
     // x/y are processes
     inline bool is_connected_pes(GraphElem const& x, GraphElem const& y)
     {
-      if ((x == y) || bf_->contains(x,y))
+      if ((x == y) || bf_->contains(x,y) || bf_->contains(y,x))
         return true;
       return false;
     }
