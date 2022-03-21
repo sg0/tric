@@ -271,7 +271,7 @@ class TriangulateAggrBufferedHeuristics
     // TODO FIXME overallocation & multiple
     // insertions (wasted cycles), unique 
     // neighbors + 1 is ideal
-    bf_ = new Bloomfilter(rdisp*size_, 10, 1.0E-06);
+    bf_ = new Bloomfilter(rdisp*2, 10, 1.0E-06);
 
     for (int p = 0; p < size_; p++)
     {
