@@ -73,7 +73,7 @@ class Bloomfilter
 
       hashes_.resize(k_); 
       bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), false);
+      std::fill(bits_.begin(), bits_.end(), true);
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
@@ -89,7 +89,7 @@ class Bloomfilter
 
       hashes_.resize(k_); 
       bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), false);
+      std::fill(bits_.begin(), bits_.end(), true);
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
@@ -99,7 +99,7 @@ class Bloomfilter
     {
       hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
-        bits_[hashes_[k]] = true;
+        bits_[hashes_[k]] = false;
     }
 
     void print() const
@@ -123,7 +123,7 @@ class Bloomfilter
       hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
       {
-        if (!bits_[hashes_[k]]) 
+        if (bits_[hashes_[k]]) 
           return false;
       }
       return true;
@@ -138,7 +138,7 @@ class Bloomfilter
       uint64_t key[2] = {lhs, rhs};
       for (uint64_t n = 0; n < k_; n+=2)
       {
-        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), n, &hashes_[n] );
+        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), 0, &hashes_[n] );
         hashes_[n] = hashes_[n] % m_; 
         hashes_[n+1] = hashes_[n+1] % m_;
       }

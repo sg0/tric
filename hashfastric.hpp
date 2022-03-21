@@ -37,8 +37,8 @@
 //
 // ************************************************************************ 
 #pragma once
-#ifndef DEGCOMM_TFASTRIC_HPP
-#define DEGCOMM_TFASTRIC_HPP
+#ifndef HASH_TFASTRIC_HPP
+#define HASH_TFASTRIC_HPP
 
 #include "graph.hpp"
 
@@ -69,13 +69,13 @@ class Bloomfilter
 
       hashes_.resize(k_); 
       bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), '0');
+      std::fill(bits_.begin(), bits_.end(), '1');
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
     }
         
-    Bloomfilter(GraphElem n, GraphElem k, GraphWeight p=BLOOMFILTER_TOL) 
+    Bloomfilter(GraphElem n, GraphElem k, GraphWeight p) 
       : n_(pow(2, std::ceil(log(n)/log(2)))), k_(k), p_(p)
     {
       m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
@@ -85,7 +85,7 @@ class Bloomfilter
 
       hashes_.resize(k_); 
       bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), '0');
+      std::fill(bits_.begin(), bits_.end(), '1');
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
@@ -95,7 +95,7 @@ class Bloomfilter
     {
       hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
-        bits_[hashes_[k]] = '1';
+        bits_[hashes_[k]] = '0';
     }
 
     void print() const
@@ -119,7 +119,7 @@ class Bloomfilter
       hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
       {
-        if (bits_[hashes_[k]] == '0') 
+        if (bits_[hashes_[k]] == '1') 
           return false;
       }
       return true;
@@ -145,7 +145,7 @@ class Bloomfilter
       uint64_t key[2] = {lhs, rhs};
       for (uint64_t n = 0; n < k_; n+=2)
       {
-        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), n, &hashes_[n] );
+        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), 0, &hashes_[n] );
         hashes_[n] = hashes_[n] % m_; 
         hashes_[n+1] = hashes_[n+1] % m_;
       }
@@ -155,21 +155,50 @@ class Bloomfilter
     std::vector<uint64_t> hashes_;
 };
 
-class TriangulateHashBased
+class TriangulateAggrBufferedHash
 {
   public:
 
-    TriangulateHashBased(Graph* g): 
-      g_(g), sbf_(nullptr), rbf_(nullptr), pbf_(nullptr), pdegree_(0), ntriangles_(0), 
-      targets_(0), gcomm_(MPI_COMM_NULL)
+    TriangulateAggrBufferedHash(Graph* g, const GraphElem bufsize): 
+      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
+      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
+      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
+      prev_k_(nullptr), stat_(nullptr), bf_(nullptr), targets_(0), bufsize_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
     MPI_Comm_rank(comm_, &rank_);
 
-    double t0 = MPI_Wtime();
-    
     const GraphElem lnv = g_->get_lnv();
+    const GraphElem nv = g_->get_nv();
+
+    vcount_ = new GraphElem[lnv]();
+    erange_ = new GraphElem[nv*2]();
+
+    double t0 = MPI_Wtime();
+
+    // store edge ranges
+    GraphElem base = g_->get_base(rank_);
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1;
+      g_->edge_range(i, e0, e1);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      Edge const& edge_s = g_->get_edge(e0);
+      Edge const& edge_t = g_->get_edge(e1-1);
+
+      erange_[(i + base)*2] = edge_s.tail_;
+      erange_[(i + base)*2+1] = edge_t.tail_;
+    }
+    
+    MPI_Barrier(comm_);
+    
+    MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
+        MPI_SUM, comm_);
+
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
@@ -178,11 +207,11 @@ class TriangulateHashBased
       if ((e0 + 1) == e1)
         continue;
 
-      for (GraphElem m = e0; m < e1; m++)
+      for (GraphElem m = e0; m < e1-1; m++)
       {
-        Edge const& edge_m = g_->get_edge(m);
-        const int owner = g_->get_owner(edge_m.tail_);
-        tup[0] = edge_m.tail_;
+        EdgeStat& edge_m = g_->get_edge_stat(m);
+        const int owner = g_->get_owner(edge_m.edge_->tail_);
+        tup[0] = edge_m.edge_->tail_;
 
         if (owner == rank_)
         {
@@ -190,7 +219,7 @@ class TriangulateHashBased
           {
             Edge const& edge_n = g_->get_edge(n);
             tup[1] = edge_n.tail_;
-
+            
             if (check_edgelist(tup))
               ntriangles_ += 1;
           }
@@ -198,7 +227,7 @@ class TriangulateHashBased
         else
         {  
           if (std::find(targets_.begin(), targets_.end(), owner) 
-              == targets_.end()) 
+              == targets_.end())
             targets_.push_back(owner);
         }
       }
@@ -217,204 +246,189 @@ class TriangulateHashBased
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
 
-    if (size_ > 1)
+    pdegree_ = targets_.size();
+
+    for (int i = 0; i < pdegree_; i++)
+      pindex_.insert({targets_[i], i});
+    
+    t0 = MPI_Wtime();
+
+    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_, 0), rcounts(size_, 0);
+    std::vector<int> source_counts(size_, 0);
+    GraphElem *send_count  = new GraphElem[size_]();
+    GraphElem *recv_count  = new GraphElem[size_]();
+
+    MPI_Barrier(comm_);
+    
+    const int targets_size = targets_.size();
+    MPI_Allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, comm_);
+
+    int sdisp = 0, rdisp = 0;
+
+    for (int p = 0; p < size_; p++)
     {
-      MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
-          MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
-          MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
-
-      // double-checking indegree/outdegree
-      int weighted, indegree, outdegree;
-      MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
-      assert(indegree == targets_.size());
-      assert(outdegree == targets_.size());
-      assert(indegree == outdegree);
-
-      pdegree_ = indegree; // for undirected graph, indegree == outdegree
-
-      for (int i = 0; i < pdegree_; i++)
-        pindex_.insert({targets_[i], i});
-
-      sbf_ = new Bloomfilter*[pdegree_];
-      rbf_ = new Bloomfilter*[pdegree_];
-
-      t0 = MPI_Wtime();
-
-      std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_, 0), rcounts(pdegree_, 0);
-      std::vector<int> source_counts(pdegree_, 0);
-      GraphElem *send_count  = new GraphElem[pdegree_]();
-      GraphElem *recv_count  = new GraphElem[pdegree_]();
-
-      const int targets_size = targets_.size();
-      MPI_Neighbor_allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, gcomm_);
-
-      int sdisp = 0, rdisp = 0;
-
-      for (GraphElem p = 0; p < pdegree_; p++)
-      {
-        rdispls[p] = rdisp;
-        rdisp += source_counts[p];
-      }
-
-      std::vector<int> source_data(rdisp, 0);
-
-      MPI_Neighbor_allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
-          source_counts.data(), rdispls.data(), MPI_INT, gcomm_);
-      
-      // TODO FIXME overallocation & multiple
-      // insertions (wasted cycles), unique 
-      // neighbors + 1 is ideal
-      pbf_ = new Bloomfilter(rdisp);
-
-      for (int p = 0; p < pdegree_; p++)
-      {
-        for (int n = 0; n < rdisp; n+=source_counts[p])
-        {
-          if (rank_ != source_data[n])
-            pbf_->insert(targets_[p], source_data[n]);
-        }
-      }
-
-      // TODO FIXME this is wrong, send_count
-      for (GraphElem i = 0; i < lnv; i++)
-      {
-        GraphElem e0, e1, tup[2];
-        g_->edge_range(i, e0, e1);
-
-        if ((e0 + 1) == e1)
-          continue;
-
-        for (GraphElem m = e0; m < e1; m++)
-        {
-          Edge const& edge_m = g_->get_edge(m);
-          const int owner = g_->get_owner(edge_m.tail_);
-
-          if (owner != rank_)
-          { 
-            if (pbf_->contains(rank_, owner))
-              send_count[pindex_[owner]] += 1;
-          }
-        }
-      }
-
-      MPI_Neighbor_alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, gcomm_);
-
-      sdisp = 0;
-      rdisp = 0;
-
-      for (GraphElem p = 0; p < pdegree_; p++)
-      {
-        sbf_[p] = new Bloomfilter(send_count[p]);
-        sdispls[p] = sdisp;
-        scounts[p] = sbf_[p]->nbits();
-        sdisp += scounts[p];
-
-        rbf_[p] = new Bloomfilter(recv_count[p]);
-        rdispls[p] = rdisp;
-        rcounts[p] = rbf_[p]->nbits();
-        rdisp += rcounts[p];
-      }
-
-      // store remote edges in bloomfilter and communicate 
-      for (GraphElem i = 0; i < lnv; i++)
-      {
-        GraphElem e0, e1, tup[2];
-        g_->edge_range(i, e0, e1);
-
-        if ((e0 + 1) == e1)
-          continue;
-
-        for (GraphElem m = e0; m < e1; m++)
-        {
-          Edge const& edge_m = g_->get_edge(m);
-          const int owner = g_->get_owner(edge_m.tail_);
-
-          if (owner != rank_)
-          {
-            if (pbf_->contains(rank_, owner))
-              sbf_[pindex_[owner]]->insert(edge_m.tail_, g_->local_to_global(i));
-          }
-        }
-      }
-
-      MPI_Barrier(comm_);
-
-      char *sbuf = new char[sdisp];
-      char *rbuf = new char[rdisp];
-      GraphElem c = 0;
-
-      for(GraphElem p = 0; p < pdegree_; p++)
-      {
-        sbf_[p]->copy_to(&sbuf[c]);
-        c += sbf_[p]->nbits();
-      }
-
-      MPI_Neighbor_alltoallv(sbuf, scounts.data(), sdispls.data(), 
-          MPI_CHAR, rbuf, rcounts.data(), rdispls.data(), MPI_CHAR, gcomm_);   
-
-      c = 0;
-      for(GraphElem p = 0; p < pdegree_; p++)
-      {
-        rbf_[p]->copy_from(&rbuf[c]);
-        c += rbf_[p]->nbits();
-      }
-
-      t1 = MPI_Wtime();
-      p_tot = t1 - t0, t_tot = 0.0;
-
-      MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
-
-      if (rank_ == 0) 
-      {   
-        std::cout << "Average time for inserting and exchanging bloomfilter bits (secs.): " 
-          << ((double)(t_tot / (double)size_)) << std::endl;
-      }
-
-      delete []send_count;
-      delete []recv_count;
-      delete []sbuf;
-      delete []rbuf;
-
-      sdispls.clear();
-      rdispls.clear();
-      scounts.clear();
-      rcounts.clear();
-      sdispls.clear();
-      rdispls.clear();
-      source_counts.clear();
-      source_data.clear();
+      rdispls[p] = rdisp;
+      rdisp += source_counts[p];
     }
+
+    std::vector<int> source_data(rdisp, 0);
+
+    MPI_Allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
+        source_counts.data(), rdispls.data(), MPI_INT, comm_);
+
+    // TODO FIXME overallocation & multiple
+    // insertions (wasted cycles), unique 
+    // neighbors + 1 is ideal
+    bf_ = new Bloomfilter(rdisp*2, 8, 1.0E-8);
+
+    for (int p = 0; p < size_; p++)
+    {
+      if (source_counts[p] > 0)
+      {
+        for (int n = 0; n < source_counts[p]; n++)
+            bf_->insert(p, source_data[n + rdispls[p]]);
+      }
+    }
+
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+      g_->edge_range(i, e0, e1);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        EdgeStat& edge_m = g_->get_edge_stat(m);
+        const int owner = g_->get_owner(edge_m.edge_->tail_);
+
+        if (owner != rank_)
+        {  
+          for (GraphElem n = m + 1; n < e1; n++)
+          {
+            Edge const& edge_n = g_->get_edge(n);
+                            
+            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+              break;
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+              continue;
+            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
+              continue;
+           
+            send_count[owner] += 1;
+            vcount_[i] += 1;
+          }
+        }
+      }
+    }
+
+    // outgoing/incoming data and buffer size
+    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
+    
+    for (GraphElem p = 0; p < size_; p++)
+    {
+      out_nghosts_ += send_count[p];
+      in_nghosts_ += recv_count[p];
+    }
+    
+    nghosts_ = out_nghosts_ + in_nghosts_;
+
+    bufsize_ = ((nghosts_*3) < bufsize) ? (nghosts_*3) : bufsize;
+    MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+
+    if (rank_ == 0)
+      std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
+    
+    rbuf_     = new GraphElem[bufsize_];
+    sbuf_     = new GraphElem[pdegree_*bufsize_];
+    sbuf_ctr_ = new GraphElem[pdegree_]();
+    prev_k_   = new GraphElem[pdegree_];
+    prev_m_   = new GraphElem[pdegree_];
+    stat_     = new char[pdegree_];
+    sreq_     = new MPI_Request[pdegree_];
+
+    std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
+    std::fill(prev_k_, prev_k_ + pdegree_, -1);
+    std::fill(prev_m_, prev_m_ + pdegree_, -1);
+    std::fill(stat_, stat_ + pdegree_, '0');
+
+    MPI_Barrier(comm_);
+
+#if defined(DEBUG_PRINTF)
+    if (rank_ == 0)
+    {
+      std::cout << "Edge range per vertex (#ID: <range>): " << std::endl;
+      for (int i = 0, j = 0; i < nv*2; i+=2, j++)
+        std::cout << j << ": " << erange_[i] << ", " << erange_[i+1] << std::endl;
+    }
+#endif
+    
+    delete []send_count;
+    delete []recv_count;
+
+    sdispls.clear();
+    rdispls.clear();
+    scounts.clear();
+    rcounts.clear();
+    sdispls.clear();
+    rdispls.clear();
+    source_counts.clear();
+    source_data.clear();
   }
 
-    ~TriangulateHashBased() {}
+    ~TriangulateAggrBufferedHash() {}
 
     void clear()
     {
-      MPI_Comm_free(&gcomm_);
-      
+      bf_->clear();
+
+      delete []sbuf_;
+      delete []rbuf_;
+      delete []sbuf_ctr_;
+      delete []sreq_;
+      delete []prev_k_;
+      delete []prev_m_;
+      delete []stat_;
+      delete []vcount_;
+      delete []erange_;
+      delete bf_;
+
       pindex_.clear();
       targets_.clear();
-
-      for(GraphElem p = 0; p < pdegree_; p++)
-      {
-        rbf_[p]->clear();
-        sbf_[p]->clear();
-      }
-
-      if (pbf_)
-        pbf_->clear();
-
-      delete []rbf_;
-      delete []sbf_;
     }
 
-    inline GraphElem count()
+    // x/y are processes
+    inline bool is_connected_pes(GraphElem const& x, GraphElem const& y)
+    {
+      if ((x == y) || bf_->contains(x,y) || bf_->contains(y,x))
+        return true;
+      return false;
+    }
+
+    void nbsend(GraphElem owner)
+    {
+      if (sbuf_ctr_[pindex_[owner]] > 0)
+      {
+        MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
+            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+      }
+    }
+
+    void nbsend()
+    {
+      for (int const& p : targets_)
+        nbsend(p);
+    }
+
+    inline void lookup_edges()
     {
       const GraphElem lnv = g_->get_lnv();
-      GraphElem rtriangles = 0;
-
       for (GraphElem i = 0; i < lnv; i++)
       {
+        if (vcount_[i] == 0) // all edges processed, move on
+          continue;
+
         GraphElem e0, e1;
         g_->edge_range(i, e0, e1);
 
@@ -423,30 +437,88 @@ class TriangulateHashBased
 
         for (GraphElem m = e0; m < e1-1; m++)
         {
-          Edge const& edge_m = g_->get_edge(m);
-          const int owner = g_->get_owner(edge_m.tail_);
+          EdgeStat& edge = g_->get_edge_stat(m);
+          const int owner = g_->get_owner(edge.edge_->tail_);
           const GraphElem pidx = pindex_[owner];
+          const GraphElem disp = pidx*bufsize_;
 
-          if (owner != rank_)
+          if (owner != rank_ && edge.active_)
           {   
-            if (pbf_->contains(rank_, owner))
+            if (stat_[pidx] == '1') 
+              continue;
+
+            if (m >= prev_m_[pidx])
             {
-              for (GraphElem n = m + 1; n < e1; n++)
-              { 
+              if (sbuf_ctr_[pidx] == (bufsize_-1))
+              {
+                prev_m_[pidx] = m;
+                prev_k_[pidx] = -1;
+                stat_[pidx] = '1'; // messages in-flight
+
+                nbsend(owner);
+
+                continue;
+              }
+
+              sbuf_[disp+sbuf_ctr_[pidx]] = edge.edge_->tail_;
+              sbuf_ctr_[pidx] += 1;
+
+              for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+              {  
                 Edge const& edge_n = g_->get_edge(n);                                
-                if (rbf_[pidx]->contains(edge_m.tail_, edge_n.tail_))
-                  rtriangles += 1;
+                                
+                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+                  break;
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
+                  continue;
+                if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
+                  continue;
+
+                if (sbuf_ctr_[pidx] == (bufsize_-1))
+                {
+                  prev_m_[pidx] = m;
+                  prev_k_[pidx] = n;
+
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
+                  sbuf_ctr_[pidx] += 1;
+                  stat_[pidx] = '1'; 
+
+                  nbsend(owner);
+
+                  break;
+                }
+                              
+                sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
+                sbuf_ctr_[pidx] += 1;
+                out_nghosts_ -= 1;
+                vcount_[i] -= 1;
+              }
+              
+              if (stat_[pidx] == '0') 
+              {               
+                prev_m_[pidx] = m;
+                prev_k_[pidx] = -1;
+                
+                edge.active_ = false;
+
+                if (sbuf_ctr_[pidx] == (bufsize_-1))
+                {
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_ctr_[pidx] += 1;
+                  stat_[pidx] = '1';
+
+                  nbsend(owner);
+                }
+                else
+                {
+                  sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
+                  sbuf_ctr_[pidx] += 1;
+                }
               }
             }
           }
         }
       }
-      
-      GraphElem ttc[2] = {0,0}, ltc[2] = {ntriangles_, rtriangles};
-      MPI_Barrier(comm_);
-      MPI_Reduce(ltc, ttc, 2, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
-
-      return (ttc[0] / 3) + (ttc[1] / 2);
     }
 
     inline bool check_edgelist(GraphElem tup[2])
@@ -464,18 +536,175 @@ class TriangulateHashBased
       }
       return false;
     }
+    
+    inline bool edge_between_range(GraphElem x, GraphElem y) const
+    {
+      if ((y >= erange_[x*2]) && (y <= erange_[x*2+1]))
+        return true;
+      return false;
+    }
+     
+    inline bool edge_above_min(GraphElem x, GraphElem y) const
+    {
+      if (y >= erange_[x*2])
+        return true;
+      return false;
+    }
+
+    inline bool edge_within_max(GraphElem x, GraphElem y) const
+    {
+      if (y <= erange_[x*2+1])
+        return true;
+      return false;
+    }
+
+    inline void process_messages()
+    {
+      MPI_Status status;
+      int flag = -1;
+      GraphElem tup[2] = {-1,-1}, k = 0, prev = 0;
+      int count = 0, source = -1;
+
+      MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, comm_, &flag, &status);
+
+      if (flag)
+      { 
+        source = status.MPI_SOURCE;
+        MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
+        MPI_Recv(rbuf_, count, MPI_GRAPH_TYPE, source, 
+            TAG_DATA, comm_, MPI_STATUS_IGNORE);       
+      }
+      else
+        return;
+
+      while(1)
+      {
+        if (k == count)
+          break;
+
+        if (rbuf_[k] == -1)
+        {
+          k += 1;
+          prev = k;
+          continue;
+        }
+
+        tup[0] = rbuf_[k];
+        GraphElem curr_count = 0;
+
+        for (GraphElem m = k + 1; m < count; m++)
+        {
+          if (rbuf_[m] == -1)
+          {
+            curr_count = m + 1;
+            break;
+          }
+
+          tup[1] = rbuf_[m];
+
+          if (check_edgelist(tup))
+            ntriangles_ += 1;
+
+          in_nghosts_ -= 1;
+        }
+
+        k += (curr_count - prev);
+        prev = k;
+      }
+    }
+
+    inline GraphElem count()
+    {
+#if defined(USE_ALLREDUCE_FOR_EXIT)
+      GraphElem count;
+#else      
+      bool done = false, nbar_active = false; 
+      MPI_Request nbar_req = MPI_REQUEST_NULL;
+#endif
+
+      bool sends_done = false;
+      int *inds = new int[pdegree_];
+      int over = -1;
+
+#if defined(USE_ALLREDUCE_FOR_EXIT)
+      while(1)
+#else
+      while(!done)
+#endif
+      {  
+        if (out_nghosts_ == 0)
+        {
+          if (!sends_done)
+          {
+            nbsend();
+            sends_done = true;
+          }
+        }
+        else
+          lookup_edges();
+
+        process_messages();
+
+        MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
+
+        if (over != MPI_UNDEFINED)
+        {
+          for (int i = 0; i < over; i++)
+          {
+            GraphElem idx = static_cast<GraphElem>(inds[i]);
+            sbuf_ctr_[idx] = 0;
+            stat_[idx] = '0';
+          }
+        }
+
+#if defined(USE_ALLREDUCE_FOR_EXIT)
+        count = in_nghosts_;
+        MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
+        if (count == 0)
+          break;
+#else       
+        if (nbar_active)
+        {
+          int test_nbar = -1;
+          MPI_Test(&nbar_req, &test_nbar, MPI_STATUS_IGNORE);
+          done = !test_nbar ? false : true;
+        }
+        else
+        {
+          if (in_nghosts_ == 0)
+          {
+            MPI_Ibarrier(comm_, &nbar_req);
+            nbar_active = true;
+          }
+        }
+#endif
+#if defined(DEBUG_PRINTF)
+        std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
+#endif            
+      }
+
+      GraphElem ttc = 0, ltc = ntriangles_;
+      MPI_Barrier(comm_);
+      MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
+
+      free(inds);
+
+      return (ttc/3);
+    }
 
   private:
     Graph* g_;
-    Bloomfilter **rbf_, **sbf_, *pbf_;
 
-    GraphElem ntriangles_, pdegree_;
-    char *sbuf_, *rbuf_; 
+    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
+    GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
+    MPI_Request *sreq_;
+    char *stat_;
+    Bloomfilter *bf_;
 
     std::vector<int> targets_;
 
     int rank_, size_;
     std::unordered_map<int, int> pindex_; 
-    MPI_Comm comm_, gcomm_;
+    MPI_Comm comm_;
 };
 #endif

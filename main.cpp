@@ -69,7 +69,7 @@
 #include "rmabufastric.hpp"
 #elif defined(AGGR_HEUR) // comm-avoiding heuristics
 #include "hbufastric.hpp"
-#elif defined(HASH_COMM) // hash-based communication
+#elif defined(AGGR_HASH) // hash-based edge query
 #include "hashfastric.hpp"
 #elif defined(AGGR_MAP) // aggregate buffered + heuristics using map
 #include "mbufastric.hpp"
@@ -180,9 +180,7 @@ int main(int argc, char *argv[])
   TriangulateAggrFatBatch tr(g);
 #elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
   TriangulateEstimate tr(g);
-#elif defined(HASH_COMM)
-  TriangulateHashBased tr(g);
-#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) 
+#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH)
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
 #if defined(AGGR_BUFR)
@@ -191,6 +189,8 @@ int main(int argc, char *argv[])
   TriangulateAggrBufferedRMA tr(g, bufferSize);
 #elif defined(AGGR_MAP)
   TriangulateAggrBufferedMap tr(g, bufferSize);
+#elif defined(AGGR_HASH)
+  TriangulateAggrBufferedHash tr(g, bufferSize);
 #else
   TriangulateAggrBufferedHeuristics tr(g, bufferSize);
 #endif
@@ -219,7 +219,7 @@ int main(int argc, char *argv[])
     std::cout << "Number of triangles: " << ntris << std::endl;
 #endif
     else
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_ARR)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH)
       std::cout << "User initialized per-PE buffer count: " << bufferSize << std::endl;
 #endif
     std::cout << "Number of triangles: " << ntris << std::endl;
