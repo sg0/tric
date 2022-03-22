@@ -155,6 +155,46 @@ class Bloomfilter
     std::vector<uint64_t> hashes_;
 };
 
+class MapVec
+{
+  public:
+    MapVec(): data_() {}
+    ~MapVec() 
+    { data_.clear(); }
+
+    inline void insert(int key, int value)
+    {
+      if (data_.count(key) > 0)
+          data_[key].emplace_back(value);
+      else
+      {
+        data_.emplace(key, std::vector<int>());
+        data_[key].emplace_back(value);
+      }
+    }
+
+    inline bool contains(int key, int value)
+    {
+      if (std::find_if(data_[key].begin(), data_[key].end(), 
+            [value](int const& element){ return element == value;}) == data_[key].end())
+        return false;
+      return true;
+    }
+
+    inline void clear() 
+    {
+      for (auto it = data_.begin(); it != data_.end(); ++it)
+        it->second.clear();
+      data_.clear();
+    }
+
+    GraphElem size() const
+    { return data_.size(); }
+    
+  private:
+    std::unordered_map<int,std::vector<int>> data_;
+};
+
 class TriangulateAggrBufferedHash
 {
   public:
@@ -204,7 +244,8 @@ class TriangulateAggrBufferedHash
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
-    ebf_ = new Bloomfilter(lne*2);
+    if (lne)
+      ebf_ = new Bloomfilter(lne*2);
    
     // setup bloom filter and perform local counting 
     for (GraphElem i = 0; i < lnv; i++)
@@ -283,16 +324,26 @@ class TriangulateAggrBufferedHash
     MPI_Allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
         source_counts.data(), rdispls.data(), MPI_INT, comm_);
 
-    pbf_ = new Bloomfilter(rdisp*2, 8, 1.0E-8);
+#if defined(USE_BLOOMF_PG)
+    pbf_ = static_cast<Bloomfilter*>(new Bloomfilter(rdisp*2, 8, 1.0E-8));
+#else
+    pbf_ = static_cast<MapVec*>(new MapVec());
+#endif
 
+#if 0
     for (int p = 0; p < size_; p++)
     {
       if (source_counts[p] > 0)
       {
         for (int n = 0; n < source_counts[p]; n++)
-            pbf_->insert(p, source_data[n + rdispls[p]]);
+          pbf_->insert(p, source_data[n + rdispls[p]]);
       }
     }
+#endif
+
+    for (int p = 0; p < pdegree_; p++)
+      for (int n = 0; n < source_counts[targets_[p]]; n++)
+        pbf_->insert(targets_[p], source_data[n + rdispls[targets_[p]]]);
 
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -708,7 +759,12 @@ class TriangulateAggrBufferedHash
     GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_;
     char *stat_;
-    Bloomfilter *pbf_, *ebf_;
+    Bloomfilter *ebf_;
+#if defined(USE_BLOOMF_PG)
+    Bloomfilter *pbf_;
+#else
+    MapVec *pbf_;
+#endif
 
     std::vector<int> targets_;
 
