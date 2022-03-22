@@ -175,9 +175,9 @@ class MapVec
 
     inline bool contains(int key, int value)
     {
-      if (std::find_if(data_[key].begin(), data_[key].end(), 
-            [value](int const& element){ return element == value;}) == data_[key].end())
-        return false;
+        if (std::find_if(data_[key].begin(), data_[key].end(), 
+              [value](int const& element){ return element == value;}) == data_[key].end())
+          return false;
       return true;
     }
 
@@ -201,9 +201,9 @@ class TriangulateAggrBufferedHash
 
     TriangulateAggrBufferedHash(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
-      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), rtriangles_(0),  
-      nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), pbf_(nullptr), ebf_(nullptr), targets_(0), bufsize_(0)
+      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), nghosts_(0), 
+      out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), prev_k_(nullptr), 
+      stat_(nullptr), pbf_(nullptr), ebf_(nullptr), targets_(0), bufsize_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -667,7 +667,7 @@ class TriangulateAggrBufferedHash
           }
 
           if (ebf_->contains(rbuf_[k], rbuf_[m]))
-            rtriangles_ += 1;
+            ntriangles_ += 1;
 
           in_nghosts_ -= 1;
         }
@@ -747,19 +747,19 @@ class TriangulateAggrBufferedHash
 #endif            
       }
 
-      GraphElem ttc[2] = {0,0}, ltc[2] = {ntriangles_, rtriangles_};
+      GraphElem ttc = 0, ltc = ntriangles_;
       MPI_Barrier(comm_);
-      MPI_Reduce(ltc, ttc, 2, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
+      MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
       free(inds);
 
-      return ((ttc[0] + ttc[1])/3);
+      return (ttc / 3);
     }
 
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, rtriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
+    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
     GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_;
     char *stat_;
