@@ -65,7 +65,7 @@ struct Edge
     Edge(): tail_(-1), weight_(0.0) {}
 };
 
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) // aggregate buffered
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_CHASH) // aggregate buffered
 struct EdgeStat
 {
     Edge const *edge_;
@@ -125,7 +125,7 @@ class Graph
 
         ~Graph() 
         {
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_CHASH)
           edge_stat_.clear();
 #endif
           edge_list_.clear();
@@ -200,7 +200,7 @@ class Graph
         Edge& set_edge(GraphElem const index)
         { return edge_list_[index]; }       
                 
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_CHASH)
         EdgeStat& get_edge_stat(GraphElem const index)
         { return edge_stat_[index]; }
 #endif
@@ -303,7 +303,7 @@ class Graph
         }
         
         // public variables
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_CHASH)
         std::vector<EdgeStat> edge_stat_;
 #endif
         std::vector<GraphElem> edge_indices_;
@@ -428,7 +428,7 @@ class BinaryEdgeList
                 g->edge_indices_[i] -= g->edge_indices_[0];   
             g->edge_indices_[0] = 0;
             
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP)  || defined(AGGR_HASH)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP)  || defined(AGGR_HASH) || defined(AGGR_CHASH)
             MPI_Barrier(comm_);
             for (GraphElem i=0; i < N_local_; i++)
                 g->edge_stat_.emplace_back((Edge const*)&g->edge_list_[i]);
@@ -592,7 +592,7 @@ class BinaryEdgeList
                 g->edge_indices_[i] -= g->edge_indices_[0];   
             g->edge_indices_[0] = 0;
 
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP)  || defined(AGGR_HASH)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP)  || defined(AGGR_HASH) || defined(AGGR_CHASH)
             MPI_Barrier(comm_);
             for (GraphElem i=0; i < N_local_; i++)
                 g->edge_stat_.emplace_back((Edge const*)&g->edge_list_[i]);
