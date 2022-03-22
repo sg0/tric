@@ -109,9 +109,9 @@ class Bloomfilter
     }
 
     void clear()
-    { 
-      bits_.clear(); 
-      hashes_.clear(); 
+    {
+        bits_.clear(); 
+        hashes_.clear(); 
     }
 
     bool contains(GraphElem i, GraphElem j) 
@@ -161,19 +161,24 @@ class TriangulateAggrBufferedHash
 
     TriangulateAggrBufferedHash(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
-      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
+      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), rtriangles_(0),  
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), bf_(nullptr), targets_(0), bufsize_(0)
+      prev_k_(nullptr), stat_(nullptr), pbf_(nullptr), ebf_(nullptr), targets_(0), bufsize_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
     MPI_Comm_rank(comm_, &rank_);
 
+    const GraphElem lne = g_->get_lne();
     const GraphElem lnv = g_->get_lnv();
     const GraphElem nv = g_->get_nv();
 
     vcount_ = new GraphElem[lnv]();
     erange_ = new GraphElem[nv*2]();
+    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_, 0), rcounts(size_, 0);
+    std::vector<int> source_counts(size_, 0);
+    GraphElem *send_count  = new GraphElem[size_]();
+    GraphElem *recv_count  = new GraphElem[size_]();
 
     double t0 = MPI_Wtime();
 
@@ -199,6 +204,9 @@ class TriangulateAggrBufferedHash
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
+    ebf_ = new Bloomfilter(lne*2);
+   
+    // setup bloom filter and perform local counting 
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
@@ -207,32 +215,36 @@ class TriangulateAggrBufferedHash
       if ((e0 + 1) == e1)
         continue;
 
-      for (GraphElem m = e0; m < e1-1; m++)
+      for (GraphElem m = e0; m < e1; m++)
       {
-        EdgeStat& edge_m = g_->get_edge_stat(m);
-        const int owner = g_->get_owner(edge_m.edge_->tail_);
-        tup[0] = edge_m.edge_->tail_;
+        Edge const& edge_m = g_->get_edge(m);
+        ebf_->insert(g_->local_to_global(i), edge_m.tail_);
+        const int owner = g_->get_owner(edge_m.tail_);
 
-        if (owner == rank_)
-        {
-          for (GraphElem n = m + 1; n < e1; n++)
-          {
-            Edge const& edge_n = g_->get_edge(n);
-            tup[1] = edge_n.tail_;
-            
-            if (check_edgelist(tup))
-              ntriangles_ += 1;
-          }
-        }
-        else
+        if (owner != rank_)
         {  
           if (std::find(targets_.begin(), targets_.end(), owner) 
               == targets_.end())
             targets_.push_back(owner);
         }
+        else
+        {
+          if (m < (e1 - 1))
+          {
+            tup[0] = edge_m.tail_;
+            for (GraphElem n = m + 1; n < e1; n++)
+            {
+              Edge const& edge_n = g_->get_edge(n);
+              tup[1] = edge_n.tail_;
+
+              if (check_edgelist(tup))
+                ntriangles_ += 1;
+            }
+          }
+        }
       }
     }
-
+    
     MPI_Barrier(comm_);
 
     double t1 = MPI_Wtime();
@@ -253,11 +265,6 @@ class TriangulateAggrBufferedHash
     
     t0 = MPI_Wtime();
 
-    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_, 0), rcounts(size_, 0);
-    std::vector<int> source_counts(size_, 0);
-    GraphElem *send_count  = new GraphElem[size_]();
-    GraphElem *recv_count  = new GraphElem[size_]();
-
     MPI_Barrier(comm_);
     
     const int targets_size = targets_.size();
@@ -276,17 +283,14 @@ class TriangulateAggrBufferedHash
     MPI_Allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
         source_counts.data(), rdispls.data(), MPI_INT, comm_);
 
-    // TODO FIXME overallocation & multiple
-    // insertions (wasted cycles), unique 
-    // neighbors + 1 is ideal
-    bf_ = new Bloomfilter(rdisp*2, 8, 1.0E-8);
+    pbf_ = new Bloomfilter(rdisp*2, 8, 1.0E-8);
 
     for (int p = 0; p < size_; p++)
     {
       if (source_counts[p] > 0)
       {
         for (int n = 0; n < source_counts[p]; n++)
-            bf_->insert(p, source_data[n + rdispls[p]]);
+            pbf_->insert(p, source_data[n + rdispls[p]]);
       }
     }
 
@@ -300,22 +304,22 @@ class TriangulateAggrBufferedHash
 
       for (GraphElem m = e0; m < e1-1; m++)
       {
-        EdgeStat& edge_m = g_->get_edge_stat(m);
-        const int owner = g_->get_owner(edge_m.edge_->tail_);
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
 
         if (owner != rank_)
-        {  
+        {
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
-                            
-            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+
+            if (!edge_within_max(edge_m.tail_, edge_n.tail_))
               break;
-            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+            if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
               continue;
             if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
               continue;
-           
+
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
@@ -381,8 +385,6 @@ class TriangulateAggrBufferedHash
 
     void clear()
     {
-      bf_->clear();
-
       delete []sbuf_;
       delete []rbuf_;
       delete []sbuf_ctr_;
@@ -392,7 +394,17 @@ class TriangulateAggrBufferedHash
       delete []stat_;
       delete []vcount_;
       delete []erange_;
-      delete bf_;
+      
+      if (pbf_)
+      {
+        pbf_->clear();
+        delete pbf_;
+      }
+      if (ebf_)
+      {
+        ebf_->clear();
+        delete ebf_;
+      }
 
       pindex_.clear();
       targets_.clear();
@@ -401,7 +413,7 @@ class TriangulateAggrBufferedHash
     // x/y are processes
     inline bool is_connected_pes(GraphElem const& x, GraphElem const& y)
     {
-      if ((x == y) || bf_->contains(x,y) || bf_->contains(y,x))
+      if ((x == y) || pbf_->contains(x,y) || pbf_->contains(y,x))
         return true;
       return false;
     }
@@ -589,7 +601,6 @@ class TriangulateAggrBufferedHash
           continue;
         }
 
-        tup[0] = rbuf_[k];
         GraphElem curr_count = 0;
 
         for (GraphElem m = k + 1; m < count; m++)
@@ -600,10 +611,8 @@ class TriangulateAggrBufferedHash
             break;
           }
 
-          tup[1] = rbuf_[m];
-
-          if (check_edgelist(tup))
-            ntriangles_ += 1;
+          if (ebf_->contains(rbuf_[k], rbuf_[m]))
+            rtriangles_ += 1;
 
           in_nghosts_ -= 1;
         }
@@ -683,23 +692,23 @@ class TriangulateAggrBufferedHash
 #endif            
       }
 
-      GraphElem ttc = 0, ltc = ntriangles_;
+      GraphElem ttc[2] = {0,0}, ltc[2] = {ntriangles_, rtriangles_};
       MPI_Barrier(comm_);
-      MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
+      MPI_Reduce(ltc, ttc, 2, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
       free(inds);
 
-      return (ttc/3);
+      return ((ttc[0] + ttc[1])/3);
     }
 
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
+    GraphElem ntriangles_, rtriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
     GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_;
     char *stat_;
-    Bloomfilter *bf_;
+    Bloomfilter *pbf_, *ebf_;
 
     std::vector<int> targets_;
 
