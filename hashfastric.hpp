@@ -244,9 +244,7 @@ class TriangulateAggrBufferedHash
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
-    if (lne)
-      ebf_ = new Bloomfilter(lne*2);
-   
+
     // setup bloom filter and perform local counting 
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -259,7 +257,6 @@ class TriangulateAggrBufferedHash
       for (GraphElem m = e0; m < e1; m++)
       {
         Edge const& edge_m = g_->get_edge(m);
-        ebf_->insert(g_->local_to_global(i), edge_m.tail_);
         const int owner = g_->get_owner(edge_m.tail_);
 
         if (owner != rank_)
@@ -323,6 +320,9 @@ class TriangulateAggrBufferedHash
 
     MPI_Allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
         source_counts.data(), rdispls.data(), MPI_INT, comm_);
+    
+    if (lne)
+      ebf_ = new Bloomfilter(lne*2);
 
 #if defined(USE_BLOOMF_PG)
     pbf_ = static_cast<Bloomfilter*>(new Bloomfilter(rdisp*2, 8, 1.0E-8));
@@ -347,32 +347,36 @@ class TriangulateAggrBufferedHash
 
     for (GraphElem i = 0; i < lnv; i++)
     {
-      GraphElem e0, e1, tup[2];
+      GraphElem e0, e1;
       g_->edge_range(i, e0, e1);
 
       if ((e0 + 1) == e1)
         continue;
 
-      for (GraphElem m = e0; m < e1-1; m++)
+      for (GraphElem m = e0; m < e1; m++)
       {
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
+        ebf_->insert(g_->local_to_global(i), edge_m.tail_);
 
         if (owner != rank_)
         {
-          for (GraphElem n = m + 1; n < e1; n++)
-          {
-            Edge const& edge_n = g_->get_edge(n);
+          if (m < (e1 - 1))
+          {         
+            for (GraphElem n = m + 1; n < e1; n++)
+            {
+              Edge const& edge_n = g_->get_edge(n);
 
-            if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-              break;
-            if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
-              continue;
-            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
-              continue;
+              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                break;
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
+                continue;
+              if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
+                continue;
 
-            send_count[owner] += 1;
-            vcount_[i] += 1;
+              send_count[owner] += 1;
+              vcount_[i] += 1;
+            }
           }
         }
       }
