@@ -315,7 +315,7 @@ class TriangulateHashRemote
 
       if (recv_count[targets_[p]] > 0)
       {
-        rebf_[pindex_[p]] = new Bloomfilter(targets_[recv_count[p]]*2);
+        rebf_[p] = new Bloomfilter(recv_count[targets_[p]]*2);
         rdispls[p] = rdisp;
         rcounts[p] = rebf_[p]->nbits();
         rdisp += rcounts[p];
@@ -341,7 +341,7 @@ class TriangulateHashRemote
         const int owner = g_->get_owner(edge_m.tail_);
 
         if (owner != rank_)
-          sebf_[owner]->insert(g_->local_to_global(i), edge_m.tail_);
+          sebf_[pindex_[owner]]->insert(g_->local_to_global(i), edge_m.tail_);
         else
         {
           GraphElem l0, l1;
@@ -353,7 +353,7 @@ class TriangulateHashRemote
             const int target = g_->get_owner(edge.tail_);
             if (target != rank_)
             {
-              sebf_[target]->insert(g_->local_to_global(i), edge_m.tail_);
+              sebf_[pindex_[target]]->insert(g_->local_to_global(i), edge_m.tail_);
               break;
             }
           }
