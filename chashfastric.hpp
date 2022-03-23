@@ -161,7 +161,7 @@ class TriangulateHashRemote
 
     TriangulateHashRemote(Graph* g): 
       g_(g), pdegree_(0), erange_(nullptr), ntriangles_(0), pindex_(0), 
-      sebf_(nullptr), rebf_(nullptr), targets_(0), gcomm_(MPI_COMM_NULL)
+      sebf_(nullptr), rebf_(nullptr), targets_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -281,18 +281,7 @@ class TriangulateHashRemote
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
 
-    MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
-        MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
-        MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
-
-    // double-checking indegree/outdegree
-    int weighted, indegree, outdegree;
-    MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
-    assert(indegree == targets_.size());
-    assert(outdegree == targets_.size());
-    assert(indegree == outdegree);
-
-    pdegree_ = indegree; // for undirected graph, indegree == outdegree
+    pdegree_ = targets_.size();
 
     for (int i = 0; i < pdegree_; i++)
       pindex_.insert({targets_[i], i});
@@ -300,26 +289,30 @@ class TriangulateHashRemote
     sebf_ = new Bloomfilter*[pdegree_]; 
     rebf_ = new Bloomfilter*[pdegree_]; 
 
-    std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_,0), rcounts(pdegree_,0);
+    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_,0), rcounts(size_,0);
     GraphElem sdisp = 0, rdisp = 0;
-
+    
     for (GraphElem p = 0; p < pdegree_; p++)
     {
       if (send_count[targets_[p]] > 0)
       {
         sebf_[p] = new Bloomfilter(send_count[targets_[p]]*2);
-        sdispls[p] = sdisp;
-        scounts[p] = sebf_[p]->nbits();
-        sdisp += scounts[p];
+        scounts[targets_[p]] = sebf_[p]->nbits();
       }
 
       if (recv_count[targets_[p]] > 0)
       {
         rebf_[p] = new Bloomfilter(recv_count[targets_[p]]*2);
-        rdispls[p] = rdisp;
-        rcounts[p] = rebf_[p]->nbits();
-        rdisp += rcounts[p];
+        rcounts[targets_[p]] = rebf_[p]->nbits();
       }
+    }
+
+    for (GraphElem p = 0; p < size_; p++)
+    {
+      sdispls[p] = sdisp;
+      sdisp += scounts[p];
+      rdispls[p] = rdisp;
+      rdisp += rcounts[p];
     }
  
     t0 = MPI_Wtime();
@@ -361,19 +354,26 @@ class TriangulateHashRemote
       }
     }
  
+    MPI_Barrier(comm_);
+    
     char *sbuf = new char[sdisp];
     char *rbuf = new char[rdisp];
 
     for(GraphElem p = 0; p < pdegree_; p++)
-      sebf_[p]->copy_from(&sbuf[sdispls[p]]);
+    {
+      if (send_count[targets_[p]] > 0)
+        sebf_[p]->copy_from(&sbuf[sdispls[targets_[p]]]);
+    }
 
-    MPI_Neighbor_alltoallv(sbuf, scounts.data(), sdispls.data(), 
-        MPI_CHAR, rbuf, rcounts.data(), rdispls.data(), MPI_CHAR, gcomm_);   
+      MPI_Alltoallv(sbuf, scounts.data(), sdispls.data(), MPI_CHAR, rbuf, 
+          rcounts.data(), rdispls.data(), MPI_CHAR, comm_);   
 
     for(GraphElem p = 0; p < pdegree_; p++)
-      rebf_[p]->copy_to(&rbuf[rdispls[p]]);
-       
-    MPI_Barrier(comm_);
+    {
+      if (recv_count[targets_[p]] > 0)
+        rebf_[p]->copy_to(&rbuf[rdispls[targets_[p]]]);
+    }  
+
 
 #if defined(DEBUG_PRINTF)
     if (rank_ == 0)
@@ -399,8 +399,6 @@ class TriangulateHashRemote
 
     void clear()
     {
-      MPI_Comm_free(&gcomm_);
-      
       for (int p = 0; p < pdegree_; p++)
       {
         if (rebf_)
@@ -512,6 +510,6 @@ class TriangulateHashRemote
 
     int rank_, size_;
     std::unordered_map<int, int> pindex_; 
-    MPI_Comm comm_, gcomm_;
+    MPI_Comm comm_;
 };
 #endif
