@@ -69,7 +69,7 @@ class Bloomfilter
 
       hashes_.resize(k_); 
       bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), '1');
+      std::fill(bits_.begin(), bits_.end(), '0');
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
@@ -85,7 +85,7 @@ class Bloomfilter
 
       hashes_.resize(k_); 
       bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), '1');
+      std::fill(bits_.begin(), bits_.end(), '0');
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
@@ -95,7 +95,7 @@ class Bloomfilter
     {
       hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
-        bits_[hashes_[k]] = '0';
+        bits_[hashes_[k]] = '1';
     }
 
     void print() const
@@ -119,7 +119,7 @@ class Bloomfilter
       hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
       {
-        if (bits_[hashes_[k]] == '1') 
+        if (bits_[hashes_[k]] == '0') 
           return false;
       }
       return true;
@@ -130,11 +130,11 @@ class Bloomfilter
 
     // "nucular" options, use iff 
     // you know what you're doing
-    void copy_from(char* source)
-    { std::memcpy(bits_.data(), source, m_); }
-      
-    void copy_to(char* dest)
+    void copy_from(char* dest)
     { std::memcpy(dest, bits_.data(), m_); }
+      
+    void copy_to(char* source)
+    { std::memcpy(bits_.data(), source, m_); }
 
   private:
     GraphElem n_, m_, k_;
@@ -300,7 +300,7 @@ class TriangulateHashRemote
     sebf_ = new Bloomfilter*[pdegree_]; 
     rebf_ = new Bloomfilter*[pdegree_]; 
 
-    std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_), rcounts(pdegree_);
+    std::vector<int> rdispls(pdegree_, 0), sdispls(pdegree_, 0), scounts(pdegree_,0), rcounts(pdegree_,0);
     GraphElem sdisp = 0, rdisp = 0;
 
     for (GraphElem p = 0; p < pdegree_; p++)
@@ -363,23 +363,15 @@ class TriangulateHashRemote
  
     char *sbuf = new char[sdisp];
     char *rbuf = new char[rdisp];
-    GraphElem c = 0;
 
     for(GraphElem p = 0; p < pdegree_; p++)
-    {
-      sebf_[p]->copy_from(&sbuf[c]);
-      c += sebf_[p]->nbits();
-    }
+      sebf_[p]->copy_from(&sbuf[sdispls[p]]);
 
     MPI_Neighbor_alltoallv(sbuf, scounts.data(), sdispls.data(), 
         MPI_CHAR, rbuf, rcounts.data(), rdispls.data(), MPI_CHAR, gcomm_);   
 
-    c = 0;
     for(GraphElem p = 0; p < pdegree_; p++)
-    {
-      rebf_[p]->copy_to(&rbuf[c]);
-      c += rebf_[p]->nbits();
-    }
+      rebf_[p]->copy_to(&rbuf[rdispls[p]]);
        
     MPI_Barrier(comm_);
 
@@ -430,6 +422,7 @@ class TriangulateHashRemote
     inline GraphElem count()
     {
       const GraphElem lnv = g_->get_lnv();
+
       for (GraphElem i = 0; i < lnv; i++)
       {
         GraphElem e0, e1;
@@ -456,12 +449,14 @@ class TriangulateHashRemote
                   continue;
 
               if (rebf_[pidx]->contains(edge_m.tail_, edge_n.tail_))
+              {
                 ntriangles_ += 1;
+              }
             }
           }
         }
       }
-
+      
       GraphElem ttc = 0, ltc = ntriangles_;
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
