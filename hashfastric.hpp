@@ -209,7 +209,6 @@ class TriangulateAggrBufferedHash
     MPI_Comm_size(comm_, &size_);
     MPI_Comm_rank(comm_, &rank_);
 
-    const GraphElem lne = g_->get_lne();
     const GraphElem lnv = g_->get_lnv();
     const GraphElem nv = g_->get_nv();
 
@@ -244,6 +243,7 @@ class TriangulateAggrBufferedHash
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
+    GraphElem nedges = 0;
 
     // setup bloom filter and perform local counting 
     for (GraphElem i = 0; i < lnv; i++)
@@ -264,6 +264,8 @@ class TriangulateAggrBufferedHash
           if (std::find(targets_.begin(), targets_.end(), owner) 
               == targets_.end())
             targets_.push_back(owner);
+
+          nedges += 1;
         }
         else
         {
@@ -279,6 +281,25 @@ class TriangulateAggrBufferedHash
                 ntriangles_ += 1;
             }
           }
+
+          GraphElem l0, l1;
+          bool is_remote = false;
+          const GraphElem lv = g_->global_to_local(edge_m.tail_);
+
+          g_->edge_range(lv, l0, l1);
+
+          for (GraphElem l = l0; l < l1; l++)
+          {
+            Edge const& edge = g_->get_edge(l);
+            if (g_->get_owner(edge.tail_) != rank_)
+            {
+              is_remote = true;
+              break;
+            }
+          }
+
+          if (is_remote)
+            nedges += 1;
         }
       }
     }
@@ -292,7 +313,7 @@ class TriangulateAggrBufferedHash
 
     if (rank_ == 0) 
     {   
-      std::cout << "Average time for local counting during instantiation (secs.): " 
+      std::cout << "Average time for local counting and misc. during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
 
@@ -321,8 +342,8 @@ class TriangulateAggrBufferedHash
     MPI_Allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
         source_counts.data(), rdispls.data(), MPI_INT, comm_);
     
-    if (lne)
-      ebf_ = new Bloomfilter(lne*2);
+    if (nedges) 
+      ebf_ = new Bloomfilter(nedges*2);
 
 #if defined(USE_BLOOMF_PG)
     pbf_ = static_cast<Bloomfilter*>(new Bloomfilter(rdisp*2, 8, 1.0E-8));
@@ -357,10 +378,11 @@ class TriangulateAggrBufferedHash
       {
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
-        ebf_->insert(g_->local_to_global(i), edge_m.tail_);
 
         if (owner != rank_)
         {
+          ebf_->insert(g_->local_to_global(i), edge_m.tail_);
+
           if (m < (e1 - 1))
           {         
             for (GraphElem n = m + 1; n < e1; n++)
@@ -378,6 +400,25 @@ class TriangulateAggrBufferedHash
               vcount_[i] += 1;
             }
           }
+        }
+        else
+        {
+          GraphElem l0, l1;
+          bool is_remote = false;
+          const GraphElem lv = g_->global_to_local(edge_m.tail_);
+          g_->edge_range(lv, l0, l1);
+          for (GraphElem l = l0; l < l1; l++)
+          {
+            Edge const& edge = g_->get_edge(l);
+            if (g_->get_owner(edge.tail_) != rank_)
+            {
+              is_remote = true;
+              break;
+            }
+          }
+
+          if (is_remote)
+            ebf_->insert(g_->local_to_global(i), edge_m.tail_);
         }
       }
     }
@@ -657,6 +698,7 @@ class TriangulateAggrBufferedHash
         }
 
         GraphElem curr_count = 0;
+        tup[0] = rbuf_[k];
 
         for (GraphElem m = k + 1; m < count; m++)
         {
@@ -666,7 +708,9 @@ class TriangulateAggrBufferedHash
             break;
           }
 
-          if (ebf_->contains(rbuf_[k], rbuf_[m]))
+          tup[1] = rbuf_[m];
+
+          if (ebf_->contains(tup[0], tup[1]))
             ntriangles_ += 1;
 
           in_nghosts_ -= 1;
