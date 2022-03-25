@@ -171,6 +171,8 @@ class TriangulateHashRemote
     const GraphElem nv = g_->get_nv();
     
     erange_ = new GraphElem[nv*2]();
+    std::vector<int> vtargets; 
+    std::vector<std::vector<int>> vcount(lnv);
 
     // store edge ranges
     GraphElem base = g_->get_base(rank_);
@@ -181,6 +183,21 @@ class TriangulateHashRemote
 
       if ((e0 + 1) == e1)
         continue;
+      
+      for (GraphElem m = e0; m < e1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
+        if (owner != rank_)
+        {
+          if (std::find(vtargets.begin(), vtargets.end(), owner) 
+              == vtargets.end())
+            vtargets.push_back(owner);
+        }
+      }
+
+      vcount[i].insert(vcount[i].end(), vtargets.begin(), vtargets.end());      
+      vtargets.clear();
 
       Edge const& edge_s = g_->get_edge(e0);
       Edge const& edge_t = g_->get_edge(e1-1);
@@ -221,8 +238,9 @@ class TriangulateHashRemote
               == targets_.end())
             targets_.push_back(owner);
           
-          nedges += 1;
-          send_count[owner] += 1;
+          nedges += vcount[i].size();
+          for (int p : vcount[i])
+            send_count[p] += 1;
         }
         else
         {
@@ -263,7 +281,8 @@ class TriangulateHashRemote
     }
 
     assert(nedges == std::accumulate(send_count, send_count + size_, 0));
-        
+    
+       
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
      
@@ -333,7 +352,10 @@ class TriangulateHashRemote
         const int owner = g_->get_owner(edge_m.tail_);
 
         if (owner != rank_)
-          sebf_[pindex_[owner]]->insert(g_->local_to_global(i), edge_m.tail_);
+        {
+          for (int p : vcount[i])
+            sebf_[pindex_[p]]->insert(g_->local_to_global(i), edge_m.tail_);
+        }
         else
         {
           int past_target = -1;
@@ -391,7 +413,11 @@ class TriangulateHashRemote
     delete []recv_count;
     delete []sbuf;
     delete []rbuf;
-
+    
+    for (int i = 0; i < lnv; i++)
+      vcount[i].clear();
+    vcount.clear();
+ 
     scounts.clear();
     rcounts.clear();
     sdispls.clear();
