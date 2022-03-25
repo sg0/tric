@@ -239,10 +239,9 @@ class TriangulateHashRemote
             }
           }
           
+          int past_target = -1;
           GraphElem l0, l1;
-          bool is_remote = false;
           const GraphElem lv = g_->global_to_local(edge_m.tail_);
-  
           g_->edge_range(lv, l0, l1);
           
           for (GraphElem l = l0; l < l1; l++)
@@ -251,14 +250,14 @@ class TriangulateHashRemote
             const int target = g_->get_owner(edge.tail_);
             if (target != rank_)
             {
-              is_remote = true;
-              send_count[target] += 1;
-              break;
+              if (target != past_target)
+              {
+                send_count[target] += 1;
+                nedges += 1;
+                past_target = target;
+              }
             }
           }
-
-          if (is_remote)
-            nedges += 1;
         }
       }
     }
@@ -291,7 +290,7 @@ class TriangulateHashRemote
 
     std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_,0), rcounts(size_,0);
     GraphElem sdisp = 0, rdisp = 0;
-    
+   
     for (GraphElem p = 0; p < pdegree_; p++)
     {
       if (send_count[targets_[p]] > 0)
@@ -314,7 +313,7 @@ class TriangulateHashRemote
       rdispls[p] = rdisp;
       rdisp += rcounts[p];
     }
- 
+
     t0 = MPI_Wtime();
 
     MPI_Barrier(comm_);
@@ -337,6 +336,7 @@ class TriangulateHashRemote
           sebf_[pindex_[owner]]->insert(g_->local_to_global(i), edge_m.tail_);
         else
         {
+          int past_target = -1;
           GraphElem l0, l1;
           const GraphElem lv = g_->global_to_local(edge_m.tail_);
           g_->edge_range(lv, l0, l1);
@@ -346,8 +346,11 @@ class TriangulateHashRemote
             const int target = g_->get_owner(edge.tail_);
             if (target != rank_)
             {
-              sebf_[pindex_[target]]->insert(g_->local_to_global(i), edge_m.tail_);
-              break;
+              if (target != past_target)
+              {
+                sebf_[pindex_[target]]->insert(g_->local_to_global(i), edge_m.tail_);
+                past_target = target;
+              }
             }
           }
         }
@@ -365,8 +368,8 @@ class TriangulateHashRemote
         sebf_[p]->copy_from(&sbuf[sdispls[targets_[p]]]);
     }
 
-      MPI_Alltoallv(sbuf, scounts.data(), sdispls.data(), MPI_CHAR, rbuf, 
-          rcounts.data(), rdispls.data(), MPI_CHAR, comm_);   
+    MPI_Alltoallv(sbuf, scounts.data(), sdispls.data(), MPI_CHAR, rbuf, 
+        rcounts.data(), rdispls.data(), MPI_CHAR, comm_);   
 
     for(GraphElem p = 0; p < pdegree_; p++)
     {
@@ -442,9 +445,9 @@ class TriangulateHashRemote
               Edge const& edge_n = g_->get_edge(n);
                 
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-                  break;
-                if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
-                  continue;
+                break;
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
+                continue;
 
               if (rebf_[pidx]->contains(edge_m.tail_, edge_n.tail_))
               {
