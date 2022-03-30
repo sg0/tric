@@ -428,18 +428,17 @@ class TriangulateHashRemote
 
     void clear()
     {
-      for (int p = 0; p < pdegree_; p++)
+      if (rebf_ && sebf_)
       {
-        if (rebf_)
+        for (int p = 0; p < pdegree_; p++)
+        {
           rebf_[p]->clear();
-        if (sebf_)
           sebf_[p]->clear();
-      }
+        }
 
-      if (rebf_)
         delete []rebf_;
-      if (sebf_)
         delete []sebf_;
+      }
 
       pindex_.clear();
       targets_.clear();
