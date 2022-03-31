@@ -292,11 +292,11 @@ class TriangulateAggrBufferedHashPush
     for (int p = 0; p < pdegree_; p++)
     {
       sebf_[p] = new Bloomfilter(bufsize_);
-      count += sebf_[p]->nbits() + sizeof(GraphElem);
+      count += sebf_[p]->nbits();
     }
 
     sbuf_     = new char[count]();
-    rbuf_     = new char[rebf_->nbits() + sizeof(GraphElem)]();
+    rbuf_     = new char[rebf_->nbits()]();
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_m_   = new GraphElem[pdegree_];
     prev_k_   = new GraphElem[pdegree_];
@@ -347,9 +347,7 @@ class TriangulateAggrBufferedHashPush
     {
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
-        const GraphElem count = sebf_[pindex_[owner]]->nbits() + sizeof(GraphElem);
-        const GraphElem upd_scount = sbuf_ctr_[pindex_[owner]] / 2;
-        std::sprintf(&sbuf_[pindex_[owner]*count + sebf_[pindex_[owner]]->nbits()], "%ld", upd_scount);
+        const GraphElem count = sebf_[pindex_[owner]]->nbits();
         sebf_[pindex_[owner]]->copy_from(&sbuf_[pindex_[owner]*count]);
         
         MPI_Isend(&sbuf_[pindex_[owner]*count], count, MPI_CHAR, owner, 
@@ -372,14 +370,13 @@ class TriangulateAggrBufferedHashPush
 
       if (flag)
       { 
-        MPI_Recv(rbuf_, rebf_->nbits() + sizeof(GraphElem), MPI_CHAR, 
-            status.MPI_SOURCE, TAG_DATA, comm_, MPI_STATUS_IGNORE);            
-
+        MPI_Recv(rbuf_, rebf_->nbits(), MPI_CHAR, status.MPI_SOURCE, TAG_DATA, comm_, MPI_STATUS_IGNORE);            
         rebf_->copy_to(rbuf_);
 
-        GraphElem count;
-        std::sscanf(&rbuf_[rebf_->nbits()], "%ld", &count);
-        in_nghosts_ -= count;
+        if (in_nghosts_ >= bufsize_)
+          in_nghosts_ -= bufsize_;
+        else
+          in_nghosts_ = 0;
       }
       else
         return;
