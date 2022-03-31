@@ -365,14 +365,12 @@ class TriangulateAggrBufferedHashPush
     {
       MPI_Status status;
       int flag = -1;
-      GraphElem tup[2] = {-1,-1}, source = -1, prev = 0;
 
       MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, comm_, &flag, &status);
 
       if (flag)
       { 
-        source = status.MPI_SOURCE;
-        MPI_Recv(rbuf_, rebf_->nbits(), MPI_CHAR, source, 
+        MPI_Recv(rbuf_, rebf_->nbits(), MPI_CHAR, status.MPI_SOURCE, 
             TAG_DATA, comm_, MPI_STATUS_IGNORE);            
       }
       else
