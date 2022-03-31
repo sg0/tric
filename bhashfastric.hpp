@@ -166,7 +166,7 @@ class TriangulateAggrBufferedHashPush
       g_(g), sbuf_ctr_(nullptr), pdegree_(0), vcount_(nullptr), erange_(nullptr), 
       ntriangles_(0), pindex_(0), prev_m_(nullptr), prev_k_(nullptr), targets_(0), 
       bufsize_(0), sebf_(nullptr), rebf_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
-      out_nghosts_(0), in_nghosts_(0), stat_(nullptr), sreq_(nullptr) 
+      out_nghosts_(0), in_nghosts_(0), stat_(nullptr), sreq_(nullptr)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -292,11 +292,11 @@ class TriangulateAggrBufferedHashPush
     for (int p = 0; p < pdegree_; p++)
     {
       sebf_[p] = new Bloomfilter(bufsize_);
-      count += sebf_[p]->nbits();
+      count += sebf_[p]->nbits() + sizeof(GraphElem);
     }
 
     sbuf_     = new char[count]();
-    rbuf_     = new char[rebf_->nbits()]();
+    rbuf_     = new char[rebf_->nbits() + sizeof(GraphElem)]();
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_m_   = new GraphElem[pdegree_];
     prev_k_   = new GraphElem[pdegree_];
@@ -307,7 +307,7 @@ class TriangulateAggrBufferedHashPush
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(stat_, stat_ + pdegree_, '0');
-
+  
     MPI_Barrier(comm_);
 
 #if defined(DEBUG_PRINTF)
@@ -347,11 +347,13 @@ class TriangulateAggrBufferedHashPush
     {
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
-        const GraphElem count = sebf_[pindex_[owner]]->nbits();
-        char *buf = &sbuf_[pindex_[owner]*count];
-        sebf_[pindex_[owner]]->copy_from(buf);
+        const GraphElem count = sebf_[pindex_[owner]]->nbits() + sizeof(GraphElem);
+        const GraphElem upd_scount = sbuf_ctr_[pindex_[owner]] / 2;
+        std::sprintf(&sbuf_[pindex_[owner]*count + sebf_[pindex_[owner]]->nbits()], "%ld", upd_scount);
+        sebf_[pindex_[owner]]->copy_from(&sbuf_[pindex_[owner]*count]);
         
-        MPI_Isend(buf, count, MPI_CHAR, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+        MPI_Isend(&sbuf_[pindex_[owner]*count], count, MPI_CHAR, owner, 
+            TAG_DATA, comm_, &sreq_[pindex_[owner]]);
       }
     }
 
@@ -370,21 +372,19 @@ class TriangulateAggrBufferedHashPush
 
       if (flag)
       { 
-        MPI_Recv(rbuf_, rebf_->nbits(), MPI_CHAR, status.MPI_SOURCE, 
-            TAG_DATA, comm_, MPI_STATUS_IGNORE);            
+        MPI_Recv(rbuf_, rebf_->nbits() + sizeof(GraphElem), MPI_CHAR, 
+            status.MPI_SOURCE, TAG_DATA, comm_, MPI_STATUS_IGNORE);            
+
+        rebf_->copy_to(rbuf_);
+
+        GraphElem count;
+        std::sscanf(&rbuf_[rebf_->nbits()], "%ld", &count);
+        in_nghosts_ -= count;
       }
       else
         return;
 
-      if (in_nghosts_ >= bufsize_)
-        in_nghosts_ -= bufsize_;
-      else
-        in_nghosts_ = 0;
-
-      rebf_->copy_to(rbuf_);
-
       const GraphElem lnv = g_->get_lnv();
-
       for (GraphElem i = 0; i < lnv; i++)
       {
         GraphElem e0, e1;
@@ -490,57 +490,54 @@ class TriangulateAggrBufferedHashPush
             if (stat_[pidx] == '1') 
               continue;
 
-            if (m >= prev_m_[pidx])
+            if (sbuf_ctr_[pidx] == (bufsize_-1))
             {
+              prev_m_[pidx] = m;
+              prev_k_[pidx] = -1;
+              stat_[pidx] = '1'; 
+
+              nbsend(owner);
+
+              continue;
+            }
+
+            for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
+            {  
+              Edge const& edge_n = g_->get_edge(n);                                
+
+              if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
+                break;
+              if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
+                continue;
+
               if (sbuf_ctr_[pidx] == bufsize_)
               {
                 prev_m_[pidx] = m;
-                prev_k_[pidx] = -1;
-                stat_[pidx] = '1'; // messages in-flight
+                prev_k_[pidx] = n;
+                stat_[pidx] = '1'; 
 
                 nbsend(owner);
 
-                continue;
+                break;
               }
 
-              for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
-              {  
-                Edge const& edge_n = g_->get_edge(n);                                
-                                
-                if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
-                  break;
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
-                  continue;
+              sebf_[pidx]->insert(edge.edge_->tail_, edge_n.tail_);
+              sbuf_ctr_[pidx] += 2;
+              out_nghosts_ -= 1;
+              vcount_[i] -= 1;
+            }
 
-                if (sbuf_ctr_[pidx] == bufsize_)
-                {
-                  prev_m_[pidx] = m;
-                  prev_k_[pidx] = n;
-                  stat_[pidx] = '1'; 
+            if (stat_[pidx] == '0') 
+            {               
+              prev_m_[pidx] = m;
+              prev_k_[pidx] = -1;
 
-                  nbsend(owner);
+              edge.active_ = false;
 
-                  break;
-                }
-                              
-                sebf_[pidx]->insert(edge.edge_->tail_, edge_n.tail_);
-                sbuf_ctr_[pidx] += 2;
-                out_nghosts_ -= 1;
-                vcount_[i] -= 1;
-              }
-              
-              if (stat_[pidx] == '0') 
-              {               
-                prev_m_[pidx] = m;
-                prev_k_[pidx] = -1;
-                
-                edge.active_ = false;
-
-                if (sbuf_ctr_[pidx] == bufsize_)
-                {
-                  stat_[pidx] = '1';
-                  nbsend(owner);
-                }
+              if (sbuf_ctr_[pidx] == bufsize_)
+              {
+                stat_[pidx] = '1';
+                nbsend(owner);
               }
             }
           }

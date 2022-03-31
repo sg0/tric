@@ -77,6 +77,7 @@
 #include <random>
 #include <utility>
 #include <cstring>
+#include <cinttypes>
 
 #ifdef USE_32_BIT_GRAPH
 using GraphElem = int32_t;
