@@ -166,7 +166,7 @@ class TriangulateAggrBufferedHashPush
       g_(g), sbuf_ctr_(nullptr), pdegree_(0), vcount_(nullptr), erange_(nullptr), 
       ntriangles_(0), pindex_(0), prev_m_(nullptr), prev_k_(nullptr), targets_(0), 
       bufsize_(0), sebf_(nullptr), rebf_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
-      out_nghosts_(0), in_nghosts_(0), stat_(nullptr), sreq_(nullptr)
+      out_nghosts_(0), in_nghosts_(0), stat_(nullptr), sreq_(nullptr) 
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -181,6 +181,8 @@ class TriangulateAggrBufferedHashPush
     double t0 = MPI_Wtime();
 
     std::vector<GraphElem> send_count(size_, 0), recv_count(size_, 0); 
+    std::vector<int> vtargets;
+    vcount_.resize(lnv);
 
     // store edge ranges
     GraphElem base = g_->get_base(rank_);
@@ -270,10 +272,11 @@ class TriangulateAggrBufferedHashPush
     
     MPI_Alltoall(send_count.data(), 1, MPI_GRAPH_TYPE, recv_count.data(), 1, MPI_GRAPH_TYPE, comm_);
     in_nghosts_ = std::accumulate(recv_count.begin(), recv_count.end(), 0);
-    GraphElem nghosts = out_nghosts_ + in_nghosts_;
-
+    
+    GraphElem nghosts = in_nghosts_ + out_nghosts_;
     bufsize_ = ((nghosts*2) < bufsize) ? (nghosts*2) : bufsize;
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+
     if (bufsize_%2 != 0)
       bufsize_ += 1;
 
@@ -478,64 +481,90 @@ class TriangulateAggrBufferedHashPush
 
         for (GraphElem m = e0; m < e1-1; m++)
         {
-          EdgeStat& edge = g_->get_edge_stat(m);
-          const int owner = g_->get_owner(edge.edge_->tail_);
-          const GraphElem pidx = pindex_[owner];
+          EdgeStat& edge_m = g_->get_edge_stat(m);
+          const int owner = g_->get_owner(edge_m.edge_->tail_);
+          const int pidx = pindex_[owner];
 
-          if (owner != rank_ && edge.active_)
-          {   
-            if (stat_[pidx] == '1') 
-              continue;
-
-            if (sbuf_ctr_[pidx] == (bufsize_-1))
+          if (edge_m.active_)
+          {
+            if (owner != rank_)
             {
-              prev_m_[pidx] = m;
-              prev_k_[pidx] = -1;
-              stat_[pidx] = '1'; 
-
-              nbsend(owner);
-
-              continue;
-            }
-
-            for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
-            {  
-              Edge const& edge_n = g_->get_edge(n);                                
-
-              if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
-                break;
-              if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
-                continue;
-
-              if (sbuf_ctr_[pidx] == bufsize_)
+              if (m >= prev_m_[pidx])
               {
-                prev_m_[pidx] = m;
-                prev_k_[pidx] = n;
-                stat_[pidx] = '1'; 
+                if (stat_[pidx] == '1') 
+                  continue;
 
-                nbsend(owner);
+                for (int p = ((prev_k_[pidx] == -1) ? 0 : prev_k_[pidx]); p < vcount_[i].size(); p++)
+                {
+                  if (stat_[pindex_[vcount_[i][p]]] == '1') 
+                    continue;
 
-                break;
+                  if (sbuf_ctr_[pindex_[vcount_[i][p]]] == bufsize_)
+                  {
+                    prev_m_[pidx] = m;
+                    prev_k_[pidx] = p;
+                    stat_[pindex_[vcount_[i][p]]] = '1';
+                    stat_[pidx] = '1';
+
+                    nbsend(vcount_[i][p]);
+
+                    break;
+                  }
+
+                  sebf_[pindex_[vcount_[i][p]]]->insert(g_->local_to_global(i), edge_m.edge_->tail_);
+                  out_nghosts_ -= 1;
+                  ovcount_[i] -= 1;
+                  sbuf_ctr_[pindex_[vcount_[i][p]]] += 2;
+                }
               }
-
-              sebf_[pidx]->insert(edge.edge_->tail_, edge_n.tail_);
-              sbuf_ctr_[pidx] += 2;
-              out_nghosts_ -= 1;
-              vcount_[i] -= 1;
             }
+            else
+            {
+              int past_target = -1;
+              GraphElem l0, l1;
 
+              const GraphElem lv = g_->global_to_local(edge_m.edge_->tail_);
+              g_->edge_range(lv, l0, l1);
+
+              for (GraphElem l = ((prev_k_[pidx] == -1) ? l0 : prev_k_[pidx]); l < l1; l++)
+              {
+                Edge const& edge = g_->get_edge(l);
+                const int target = g_->get_owner(edge.tail_);
+
+                if (target != rank_)
+                {
+                  if (target != past_target)
+                  {
+                    if (stat_[pindex_[target]] == '1') 
+                      continue;
+
+                    if (sbuf_ctr_[pindex_[target]] == bufsize_)
+                    {
+                      prev_m_[pidx] = m;
+                      prev_k_[pidx] = l;
+                      stat_[pindex_[target]] = '1';
+                      stat_[pidx] = '1';
+
+                      nbsend(target);
+
+                      break;
+                    }
+
+                    sebf_[pindex_[target]]->insert(g_->local_to_global(i), edge_m.edge_->tail_);
+                    out_nghosts_ -= 1;
+                    ovcount_[i] -= 1;
+                    sbuf_ctr_[pindex_[target]] += 2;
+                    past_target = target;
+                  }
+                }
+              }
+            }
             if (stat_[pidx] == '0') 
             {               
               prev_m_[pidx] = m;
               prev_k_[pidx] = -1;
 
-              edge.active_ = false;
-
-              if (sbuf_ctr_[pidx] == bufsize_)
-              {
-                stat_[pidx] = '1';
-                nbsend(owner);
-              }
+              edge_m.active_ = false;
             }
           }
         }
