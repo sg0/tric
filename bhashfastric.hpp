@@ -269,12 +269,15 @@ class TriangulateAggrBufferedHashPush
           {
             Edge const& edge = g_->get_edge(l);
             const int target = g_->get_owner(edge.tail_);
-            if ((target != rank_) && (target != past_target))
+            if (target != rank_)
             {
-              out_nghosts_ += 1;
-              send_count[target] += 1;
-              past_target = target;
-              ovcount_[i] += 1;
+              if (target != past_target)
+              {
+                out_nghosts_ += 1;
+                send_count[target] += 1;
+                ovcount_[i] += 1;
+                past_target = target;
+              }
             }
           }
         }
@@ -513,6 +516,7 @@ class TriangulateAggrBufferedHashPush
     inline void lookup_edges()
     {
       const GraphElem lnv = g_->get_lnv();
+      std::vector<int> pcurr;
 
       for (GraphElem i = 0; i < lnv; i++)
       {
@@ -555,7 +559,6 @@ class TriangulateAggrBufferedHashPush
                   out_nghosts_ -= 1;
                   ovcount_[i] -= 1;
                   sbuf_ctr_[pindex_[p]] += 2;
-                  prev_m_[pindex_[p]] = -1;
                 }
               }
             }
@@ -572,34 +575,60 @@ class TriangulateAggrBufferedHashPush
                 Edge const& edge = g_->get_edge(l);
                 const int target = g_->get_owner(edge.tail_);
 
-                if ((target != rank_) && (target != past_target))
+                if (target != rank_)
                 {
-                  if (stat_[pindex_[target]] == '1')
-                    continue;
-
-                  if (l >= prev_k_[pindex_[target]])
+                  if (target != past_target)
                   {
-                    if (sbuf_ctr_[pindex_[target]] == bufsize_)
+                    pcurr.push_back(target);
+                    
+                    if (stat_[pindex_[target]] == '1')
+                      continue;
+
+                    if (l >= prev_k_[pindex_[target]])
                     {
-                      prev_k_[pindex_[target]] = l;
-                      stat_[pindex_[target]] = '1';
+                      if (sbuf_ctr_[pindex_[target]] == bufsize_)
+                      {
+                        prev_k_[pindex_[target]] = l;
+                        stat_[pindex_[target]] = '1';
 
-                      nbsend(target);
+                        nbsend(target);
 
-                      break;
+                        break;
+                      }
+
+                      sebf_[pindex_[target]]->insert(g_->local_to_global(i), edge_m.edge_->tail_);
+                      out_nghosts_ -= 1;
+                      ovcount_[i] -= 1;
+                      sbuf_ctr_[pindex_[target]] += 2;
+                      past_target = target;
                     }
-
-                    sebf_[pindex_[target]]->insert(g_->local_to_global(i), edge_m.edge_->tail_);
-                    out_nghosts_ -= 1;
-                    ovcount_[i] -= 1;
-                    sbuf_ctr_[pindex_[target]] += 2;
-                    prev_k_[pindex_[target]] = -1;
-                    past_target = target;
                   }
                 }
               }
             }
-            if (std::find(stat_, stat_ + pdegree_, '1') == (stat_ + pdegree_))
+            bool is_done = true;
+            if (owner != rank_)
+            {
+              for (int p : vcount_[i])
+              {
+                if (stat_[pindex_[p]] == '1')
+                  is_done = false;
+                else
+                  prev_m_[pindex_[p]] = -1;
+              }
+            }
+            else
+            {
+              for (int p : pcurr)
+              {
+                if (stat_[pindex_[p]] == '1')
+                  is_done = false;
+                else
+                  prev_k_[pindex_[p]] = -1;
+              }
+              pcurr.clear();
+            }
+            if (is_done)
               edge_m.active_ = false;
           }
         }
