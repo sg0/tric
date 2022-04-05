@@ -269,15 +269,12 @@ class TriangulateAggrBufferedHashPush
           {
             Edge const& edge = g_->get_edge(l);
             const int target = g_->get_owner(edge.tail_);
-            if (target != rank_)
+            if ((target != rank_) && (target != past_target))
             {
-              if (target != past_target)
-              {
-                out_nghosts_ += 1;
-                send_count[target] += 1;
-                past_target = target;
-                ovcount_[i] += 1;
-              }
+              out_nghosts_ += 1;
+              send_count[target] += 1;
+              past_target = target;
+              ovcount_[i] += 1;
             }
           }
         }
@@ -538,12 +535,12 @@ class TriangulateAggrBufferedHashPush
             if (owner != rank_)
             {
               for (int p : vcount_[i])
-              {                
+              {
+                if (stat_[pindex_[p]] == '1')
+                  continue;
+
                 if (pindex_[p] >= prev_m_[pindex_[p]])
                 {
-                  if (stat_[pindex_[p]] == '1') 
-                    continue;
-
                   if (sbuf_ctr_[pindex_[p]] == bufsize_)
                   {
                     prev_m_[pindex_[p]] = pindex_[p];
@@ -577,11 +574,11 @@ class TriangulateAggrBufferedHashPush
 
                 if ((target != rank_) && (target != past_target))
                 {
+                  if (stat_[pindex_[target]] == '1')
+                    continue;
+
                   if (l >= prev_k_[pindex_[target]])
                   {
-                    if (stat_[pindex_[target]] == '1') 
-                      continue;
-
                     if (sbuf_ctr_[pindex_[target]] == bufsize_)
                     {
                       prev_k_[pindex_[target]] = l;
