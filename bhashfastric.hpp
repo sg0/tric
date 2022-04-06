@@ -524,12 +524,12 @@ class TriangulateAggrBufferedHashPush
 
         for (GraphElem m = e0; m < e1; m++)
         {
-          EdgeStat& edge_m = g_->get_edge_stat(m);
-          const int owner = g_->get_owner(edge_m.edge_->tail_);
-
-          if (edge_m.active_)
+          if (m >= prev_m_)
           {
-            if (m >= prev_m_)
+            EdgeStat& edge_m = g_->get_edge_stat(m);
+            const int owner = g_->get_owner(edge_m.edge_->tail_);
+
+            if (edge_m.active_)
             {
               if (owner != rank_)
               {
@@ -557,7 +557,11 @@ class TriangulateAggrBufferedHashPush
                     }
                   }
                   else
+                  {
+                    prev_m_ = m;
+                    prev_k_ = pindex_[p];
                     return;
+                  }
                 }
               }
               else
@@ -600,15 +604,19 @@ class TriangulateAggrBufferedHashPush
                         }
                       }
                       else
+                      {
+                        prev_m_ = m;
+                        prev_k_ = l;
                         return;
+                      }
                     }
                   }
                 }
               }
+              edge_m.active_ = false;
+              prev_m_ = m;
+              prev_k_ = -1;
             }
-            edge_m.active_ = false;
-            prev_m_ = m;
-            prev_k_ = -1;
           }
         }
       }
