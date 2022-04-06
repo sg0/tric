@@ -559,6 +559,7 @@ class TriangulateAggrBufferedHashPush
                     {
                       prev_m_ = m;
                       prev_k_ = pindex_[p];
+
                       return;
                     }
                   }
@@ -606,6 +607,7 @@ class TriangulateAggrBufferedHashPush
                         {
                           prev_m_ = m;
                           prev_k_ = l;
+
                           return;
                         }
                       }
