@@ -535,9 +535,9 @@ class TriangulateAggrBufferedHashPush
               {
                 for (int p : vcount_[i])
                 {
-                  if (stat_[pindex_[p]] == '0')
+                  if (pindex_[p] >= prev_k_)
                   {
-                    if (pindex_[p] >= prev_k_)
+                    if (stat_[pindex_[p]] == '0')
                     {
                       if (sbuf_ctr_[pindex_[p]] == bufsize_)
                       {
@@ -555,12 +555,12 @@ class TriangulateAggrBufferedHashPush
                       ovcount_[i] -= 1;
                       sbuf_ctr_[pindex_[p]] += 2;
                     }
-                  }
-                  else
-                  {
-                    prev_m_ = m;
-                    prev_k_ = pindex_[p];
-                    return;
+                    else
+                    {
+                      prev_m_ = m;
+                      prev_k_ = pindex_[p];
+                      return;
+                    }
                   }
                 }
               }
@@ -574,16 +574,16 @@ class TriangulateAggrBufferedHashPush
 
                 for (GraphElem l = l0; l < l1; l++)
                 {
-                  Edge const& edge = g_->get_edge(l);
-                  const int target = g_->get_owner(edge.tail_);
-
-                  if (target != rank_)
+                  if (l >= prev_k_)
                   {
-                    if (target != past_target)
+                    Edge const& edge = g_->get_edge(l);
+                    const int target = g_->get_owner(edge.tail_);
+
+                    if (target != rank_)
                     {
-                      if (stat_[pindex_[target]] == '0')
+                      if (target != past_target)
                       {
-                        if (l >= prev_k_)
+                        if (stat_[pindex_[target]] == '0')
                         {
                           if (sbuf_ctr_[pindex_[target]] == bufsize_)
                           {
@@ -602,12 +602,12 @@ class TriangulateAggrBufferedHashPush
                           sbuf_ctr_[pindex_[target]] += 2;
                           past_target = target;
                         }
-                      }
-                      else
-                      {
-                        prev_m_ = m;
-                        prev_k_ = l;
-                        return;
+                        else
+                        {
+                          prev_m_ = m;
+                          prev_k_ = l;
+                          return;
+                        }
                       }
                     }
                   }
