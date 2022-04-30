@@ -164,8 +164,8 @@ class TriangulateAggrBufferedHashPush
 
     TriangulateAggrBufferedHashPush(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), pdegree_(0), vcount_(0), ovcount_(nullptr), erange_(nullptr), 
-      ntriangles_(0), pindex_(0), prev_m_(-1), prev_k_(-1), prev_n_(-1), past_target_(-1), targets_(0), bufsize_(0), 
-      sebf_(nullptr), rebf_(nullptr), sbuf_(nullptr), rbuf_(nullptr), out_nghosts_(0), 
+      ntriangles_(0), pindex_(0), prev_i_(0), prev_n_(-1), past_target_(-1), targets_(0), 
+      bufsize_(0),  sebf_(nullptr), rebf_(nullptr), sbuf_(nullptr), rbuf_(nullptr), out_nghosts_(0), 
       in_nghosts_(0), stat_(nullptr), sreq_(nullptr) 
   {
     comm_ = g_->get_comm();
@@ -511,11 +511,8 @@ class TriangulateAggrBufferedHashPush
     {
       const GraphElem lnv = g_->get_lnv();
 
-      for (GraphElem i = 0; i < lnv; i++)
+      for (GraphElem i = prev_i_; i < lnv; i++)
       {
-        if (ovcount_[i] == 0) // all edges processed, move on
-          continue;
-
         GraphElem e0, e1, tup[2];
         g_->edge_range(i, e0, e1);
 
@@ -524,87 +521,79 @@ class TriangulateAggrBufferedHashPush
 
         for (GraphElem m = e0; m < e1; m++)
         {
-          if (m >= prev_m_)
+          EdgeStat& edge_m = g_->get_edge_stat(m);
+
+          if (edge_m.active_)
           {
-            EdgeStat& edge_m = g_->get_edge_stat(m);
             const int owner = g_->get_owner(edge_m.edge_->tail_);
 
-            if (edge_m.active_)
+            if (owner != rank_)
             {
-              if (owner != rank_)
+              for (int p = (prev_n_ == -1 ? 0 : prev_n_); p < vcount_[i].size(); p++)
               {
-                for (int p = 0; p < vcount_[i].size(); p++)
+                if (stat_[pindex_[vcount_[i][p]]] == '1')
+                  return;
+
+                if (sbuf_ctr_[pindex_[vcount_[i][p]]] == bufsize_)
                 {
-                  if (p >= prev_k_)
-                  {
-                    if (stat_[pindex_[vcount_[i][p]]] == '1')
-                      return;
+                  stat_[pindex_[vcount_[i][p]]] == '1';
 
-                    if (sbuf_ctr_[pindex_[vcount_[i][p]]] == bufsize_)
-                    {
-                      stat_[pindex_[vcount_[i][p]]] == '1';
+                  prev_n_ = p;
 
-                      nbsend(vcount_[i][p]);
+                  nbsend(vcount_[i][p]);
 
-                      return;
-                    }
-
-                    sebf_[pindex_[vcount_[i][p]]]->insert(g_->local_to_global(i), edge_m.edge_->tail_);
-                    out_nghosts_ -= 1;
-                    ovcount_[i] -= 1;
-                    sbuf_ctr_[pindex_[vcount_[i][p]]] += 2;
-                    prev_k_ = p + 1;
-                  }
+                  return;
                 }
+
+                sebf_[pindex_[vcount_[i][p]]]->insert(g_->local_to_global(i), edge_m.edge_->tail_);
+                out_nghosts_ -= 1;
+                sbuf_ctr_[pindex_[vcount_[i][p]]] += 2;
               }
-              else
-              {
-                GraphElem l0, l1;
-                const GraphElem lv = g_->global_to_local(edge_m.edge_->tail_);
-                g_->edge_range(lv, l0, l1);
-
-                for (GraphElem l = l0; l < l1; l++)
-                {
-                  if (l >= prev_n_)
-                  {
-                    Edge const& edge = g_->get_edge(l);
-                    const int target = g_->get_owner(edge.tail_);
-
-                    if (target != rank_)
-                    {
-                      if (target != past_target_)
-                      {
-                        if (stat_[pindex_[target]] == '1')
-                          return;
-
-                        if (sbuf_ctr_[pindex_[target]] == bufsize_)
-                        {
-                          stat_[pindex_[target]] = '1';
-
-                          nbsend(target);
-
-                          return;
-                        }
-
-                        sebf_[pindex_[target]]->insert(g_->local_to_global(i), edge_m.edge_->tail_);
-                        out_nghosts_ -= 1;
-                        ovcount_[i] -= 1;
-                        sbuf_ctr_[pindex_[target]] += 2;
-                        past_target_ = target;
-                        prev_n_ = l + 1;
-                      }
-                    }
-                  }
-                }
-              }
-              edge_m.active_ = false;
-              prev_m_ = m + 1;
-              prev_k_ = -1;
-              prev_n_ = -1;
-              past_target_ = -1;
             }
+            else
+            {
+              GraphElem l0, l1;
+              const GraphElem lv = g_->global_to_local(edge_m.edge_->tail_);
+              g_->edge_range(lv, l0, l1);
+
+              for (GraphElem l = ((prev_n_ == -1) ? l0 : prev_n_); l < l1; l++)
+              {
+                Edge const& edge = g_->get_edge(l);
+                const int target = g_->get_owner(edge.tail_);
+
+                if (target != rank_)
+                {
+                  if (target != past_target_)
+                  {
+                    if (stat_[pindex_[target]] == '1')
+                      return;
+
+                    if (sbuf_ctr_[pindex_[target]] == bufsize_)
+                    {
+                      stat_[pindex_[target]] = '1';
+                      
+                      prev_n_ = l;
+
+                      nbsend(target);
+
+                      return;
+                    }
+
+                    sebf_[pindex_[target]]->insert(g_->local_to_global(i), edge_m.edge_->tail_);
+                    past_target_ = target;
+                    out_nghosts_ -= 1;
+                    sbuf_ctr_[pindex_[target]] += 2;
+                  }
+                }
+              }
+            }
+            
+            edge_m.active_ = false;
+            prev_n_ = -1;
+            past_target_ = -1;
           }
         }
+        prev_i_++;
       }
     }
 
@@ -648,7 +637,7 @@ class TriangulateAggrBufferedHashPush
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, bufsize_, pdegree_, out_nghosts_, in_nghosts_, past_target_, prev_m_, prev_k_, prev_n_;
+    GraphElem ntriangles_, bufsize_, pdegree_, out_nghosts_, in_nghosts_, past_target_, prev_i_, prev_n_;
     GraphElem *sbuf_ctr_, *erange_, *ovcount_; 
     
     Bloomfilter **sebf_, *rebf_;
