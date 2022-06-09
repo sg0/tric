@@ -128,6 +128,9 @@ class Bloomfilter
     GraphElem nbits() const
     { return m_; }
 
+    char const* data() const
+    { return bits_.data(); }
+
     // "nucular" options, use iff 
     // you know what you're doing
     void copy_from(char* dest)
@@ -135,6 +138,15 @@ class Bloomfilter
       
     void copy_to(char* source)
     { std::memcpy(bits_.data(), source, m_); }
+     
+    void copy_from(char* dest, ptrdiff_t offset)
+    { std::memcpy(dest, &bits_[offset], m_); }
+      
+    void copy_to(char* source, ptrdiff_t offset)
+    { std::memcpy(&bits_[offset], source, m_); }   
+    
+    char* data()
+    { return bits_.data(); }
 
   private:
     GraphElem n_, m_, k_;
@@ -282,7 +294,6 @@ class TriangulateHashRemote
 
     assert(nedges == std::accumulate(send_count, send_count + size_, 0));
     
-       
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
      
@@ -299,6 +310,11 @@ class TriangulateHashRemote
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
 
+    // neighbor topology
+    MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
+        MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
+        MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
+
     pdegree_ = targets_.size();
 
     for (int i = 0; i < pdegree_; i++)
@@ -307,32 +323,31 @@ class TriangulateHashRemote
     sebf_ = new Bloomfilter*[pdegree_]; 
     rebf_ = new Bloomfilter*[pdegree_]; 
 
-    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_,0), rcounts(size_,0);
+    std::vector<GraphElem> scounts(pdegree_,0), rcounts(pdegree_,0);
+#if defined(USE_ALLTOALLV)
     GraphElem sdisp = 0, rdisp = 0;
-   
-    for (GraphElem p = 0; p < pdegree_; p++)
-    {
-      if (send_count[targets_[p]] > 0)
-      {
-        sebf_[p] = new Bloomfilter(send_count[targets_[p]]*2);
-        scounts[targets_[p]] = sebf_[p]->nbits();
-      }
-
-      if (recv_count[targets_[p]] > 0)
-      {
-        rebf_[p] = new Bloomfilter(recv_count[targets_[p]]*2);
-        rcounts[targets_[p]] = rebf_[p]->nbits();
-      }
-    }
-
+#endif
     for (GraphElem p = 0; p < size_; p++)
     {
-      sdispls[p] = sdisp;
-      sdisp += scounts[p];
-      rdispls[p] = rdisp;
-      rdisp += rcounts[p];
-    }
+      if (send_count[p] > 0)
+      {
+        sebf_[pindex_[p]] = new Bloomfilter(send_count[p]*2);
+        scounts[pindex_[p]] = sebf_[pindex_[p]]->nbits();
+#if defined(USE_ALLTOALLV)
+        sdisp += scounts[pindex_[p]];
+#endif
+      }
 
+      if (recv_count[p] > 0)
+      {
+        rebf_[pindex_[p]] = new Bloomfilter(recv_count[p]*2);
+        rcounts[pindex_[p]] = rebf_[pindex_[p]]->nbits();
+#if defined(USE_ALLTOALLV)
+        rdisp += rcounts[pindex_[p]];
+#endif
+      }
+    }
+    
     t0 = MPI_Wtime();
 
     MPI_Barrier(comm_);
@@ -380,25 +395,98 @@ class TriangulateHashRemote
     }
  
     MPI_Barrier(comm_);
-    
+   
+#if defined(USE_ALLTOALLV) 
     char *sbuf = new char[sdisp];
     char *rbuf = new char[rdisp];
+#else
+    MPI_Request *reqs = new MPI_Request[pdegree_*2];
+    std::fill(reqs, reqs + pdegree_*2, MPI_REQUEST_NULL);
+#endif
+      
 
-    for(GraphElem p = 0; p < pdegree_; p++)
+    // batched communication
+    int nbatches = 1;
+    GraphElem max_send_count = *std::max_element(scounts.begin(), scounts.end());
+    MPI_Allreduce(MPI_IN_PLACE, &max_send_count, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+    GraphElem batch_size = (GraphElem)std::numeric_limits<int>::max();
+    
+    while(batch_size < max_send_count)
     {
-      if (send_count[targets_[p]] > 0)
-        sebf_[p]->copy_from(&sbuf[sdispls[targets_[p]]]);
+      nbatches += 1;
+      batch_size += (GraphElem)std::numeric_limits<int>::max();
     }
 
-    MPI_Alltoallv(sbuf, scounts.data(), sdispls.data(), MPI_CHAR, rbuf, 
-        rcounts.data(), rdispls.data(), MPI_CHAR, comm_);   
+    if (rank_ == 0)
+      std::cout << "Number of batches: " << nbatches << std::endl;
 
-    for(GraphElem p = 0; p < pdegree_; p++)
+    int *batch_send_counts = new int[pdegree_*nbatches];
+    int *batch_recv_counts = new int[pdegree_*nbatches];
+    std::memset(batch_send_counts, 0, pdegree_*nbatches*sizeof(int));
+
+    for (int p = 0; p < pdegree_; p++)
     {
-      if (recv_count[targets_[p]] > 0)
-        rebf_[p]->copy_to(&rbuf[rdispls[targets_[p]]]);
-    }  
+      for (int i = 0; i < nbatches; i++)
+      {
+        batch_send_counts[p*nbatches+i] = MIN(std::numeric_limits<int>::max(), scounts[p]);
+        scounts[p] -= batch_send_counts[p*nbatches+i];
+      }
+    }
 
+    MPI_Barrier(comm_);
+
+    MPI_Neighbor_alltoall(batch_send_counts, nbatches, MPI_INT, batch_recv_counts, nbatches, MPI_INT, gcomm_);
+      
+#ifdef USE_ALLTOALLV
+    std::vector<int> rcnts(pdegree_,0), scnts(pdegree_,0);
+    std::vector<int> rdispls(pdegree_,0), sdispls(pdegree_,0);
+#endif
+
+    GraphElem spos = 0, rpos = 0;
+
+    for (int n = 0; n < nbatches; n++)
+    { 
+#ifdef USE_ALLTOALLV
+      for (int p = 0; p < pdegree_; p++)
+      {
+        sdispls[p] = (int)spos;
+        rdispls[p] = (int)rpos;
+        scnts[p] = batch_send_counts[p*nbatches+n];
+        rcnts[p] = batch_recv_counts[p*nbatches+n];
+        spos += scnts[p];
+        rpos += rcnts[p];
+      }
+    
+      for(GraphElem p = 0; p < pdegree_; p++)
+      {
+        if (scnts[p] > 0)
+          sebf_[p]->copy_from(&sbuf[sdispls[p]], n*spos);
+      }
+
+      MPI_Neighbor_alltoallv(sbuf, scnts.data(), sdispls.data(), MPI_CHAR, rbuf, rcnts.data(), rdispls.data(), MPI_CHAR, gcomm_);
+
+      for(int p = 0; p < pdegree_; p++)
+      {
+        if (rcnts[p] > 0)
+          rebf_[p]->copy_to(&rbuf[rdispls[p]], n*rpos);
+      }
+#else
+      for (int p = 0; p < pdegree_; p++)
+      {
+        MPI_Irecv(rebf_[p]->data() + n*rpos, batch_recv_counts[p*nbatches+n], MPI_CHAR, targets_[p], TAG_DATA, comm_, &reqs[p]);
+        rpos += batch_recv_counts[p*nbatches+n];
+      }
+
+      for (int p = 0; p < pdegree_; p++)
+      {
+        MPI_Isend(sebf_[p]->data() + n*spos, batch_send_counts[p*nbatches+n], MPI_CHAR, targets_[p], TAG_DATA, comm_, &reqs[p+pdegree_]);
+        spos += batch_send_counts[p*nbatches+n];
+      }
+
+      MPI_Waitall(pdegree_*2, reqs, MPI_STATUSES_IGNORE);
+#endif
+      MPI_Barrier(comm_);
+    } // end of batches
 
 #if defined(DEBUG_PRINTF)
     if (rank_ == 0)
@@ -411,23 +499,30 @@ class TriangulateHashRemote
     
     delete []send_count;
     delete []recv_count;
+    delete []batch_send_counts;
+    delete []batch_recv_counts;
+
+#if defined(USE_ALLTOALLV) 
     delete []sbuf;
     delete []rbuf;
-    
+#else
+    delete []reqs;
+#endif
+
     for (int i = 0; i < lnv; i++)
       vcount[i].clear();
     vcount.clear();
  
     scounts.clear();
     rcounts.clear();
-    sdispls.clear();
-    rdispls.clear();
   }
 
     ~TriangulateHashRemote() {}
 
     void clear()
     {
+      MPI_Comm_free(&gcomm_);
+      
       if (rebf_ && sebf_)
       {
         for (int p = 0; p < pdegree_; p++)
@@ -538,6 +633,6 @@ class TriangulateHashRemote
 
     int rank_, size_;
     std::unordered_map<int, int> pindex_; 
-    MPI_Comm comm_;
+    MPI_Comm comm_, gcomm_;
 };
 #endif
