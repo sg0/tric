@@ -299,6 +299,7 @@ class TriangulateHashRemote
      
     MPI_Barrier(comm_);
 
+
     double t1 = MPI_Wtime();
     double p_tot = t1 - t0, t_tot = 0.0;
 
@@ -426,10 +427,13 @@ class TriangulateHashRemote
 
     for (int p = 0; p < pdegree_; p++)
     {
-      for (int i = 0; i < nbatches; i++)
+      if (scounts[p] > 0)
       {
-        batch_send_counts[p*nbatches+i] = MIN(std::numeric_limits<int>::max(), scounts[p]);
-        scounts[p] -= batch_send_counts[p*nbatches+i];
+        for (int i = 0; i < nbatches; i++)
+        {
+          batch_send_counts[p*nbatches+i] = MIN(std::numeric_limits<int>::max(), scounts[p]);
+          scounts[p] -= batch_send_counts[p*nbatches+i];
+        }
       }
     }
 
@@ -441,6 +445,8 @@ class TriangulateHashRemote
     std::vector<int> rcnts(pdegree_,0), scnts(pdegree_,0);
     std::vector<int> rdispls(pdegree_,0), sdispls(pdegree_,0);
 #endif
+    
+    MPI_Barrier(comm_);
 
     GraphElem spos = 0, rpos = 0;
 
@@ -563,12 +569,10 @@ class TriangulateHashRemote
             for (GraphElem n = m + 1; n < e1; n++)
             {
               Edge const& edge_n = g_->get_edge(n);
-                
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
               if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
                 continue;
-
               if (rebf_[pidx]->contains(edge_m.tail_, edge_n.tail_))
               {
                 ntriangles_ += 1;
