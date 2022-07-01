@@ -542,10 +542,12 @@ class TriangulateAggrBufferedHashPush
         if ((e0 + 1) == e1)
           continue;
 
+        const GraphElem g_i = g_->local_to_global(i);
+        
         for (GraphElem e = e0; e < e1; e++)
         {
           Edge const& edge = g_->get_edge(e);
-          if (rbuf_->contains(g_->local_to_global(i), edge.tail_))
+          if (rbuf_->contains(g_i, edge.tail_))
             ntriangles_ += 1;
         }
       }
@@ -597,7 +599,7 @@ class TriangulateAggrBufferedHashPush
         }
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
-        count = in_nghosts_ - *scounts_;
+        count = in_nghosts_;
         MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
         if (count == 0)
           break;
