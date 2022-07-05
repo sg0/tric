@@ -203,7 +203,10 @@ class TriangulateAggrBufferedHash
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), nghosts_(0), 
       out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), prev_k_(nullptr), 
-      stat_(nullptr), pbf_(nullptr), ebf_(nullptr), targets_(0), bufsize_(0)
+      stat_(nullptr), ebf_(nullptr), targets_(0), bufsize_(0)
+#if defined(STORE_PG_INFO)
+      , pbf_(nullptr)
+#endif
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -345,6 +348,7 @@ class TriangulateAggrBufferedHash
     if (nedges) 
       ebf_ = new Bloomfilter(nedges*2);
 
+#if defined(STORE_PG_INFO)
 #if defined(USE_BLOOMF_PG)
     pbf_ = static_cast<Bloomfilter*>(new Bloomfilter(rdisp*2, 8, 1.0E-8));
 #else
@@ -365,6 +369,7 @@ class TriangulateAggrBufferedHash
     for (int p = 0; p < pdegree_; p++)
       for (int n = 0; n < source_counts[targets_[p]]; n++)
         pbf_->insert(targets_[p], source_data[n + rdispls[targets_[p]]]);
+#endif
 
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -393,9 +398,10 @@ class TriangulateAggrBufferedHash
                 break;
               if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
                 continue;
+#if defined(STORE_PG_INFO)
               if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
                 continue;
-
+#endif
               send_count[owner] += 1;
               vcount_[i] += 1;
             }
@@ -491,11 +497,13 @@ class TriangulateAggrBufferedHash
       delete []vcount_;
       delete []erange_;
       
+#if defined(STORE_PG_INFO)
       if (pbf_)
       {
         pbf_->clear();
         delete pbf_;
       }
+#endif
       if (ebf_)
       {
         ebf_->clear();
@@ -507,12 +515,14 @@ class TriangulateAggrBufferedHash
     }
 
     // x/y are processes
+#if defined(STORE_PG_INFO)
     inline bool is_connected_pes(GraphElem const& x, GraphElem const& y)
     {
       if ((x == y) || pbf_->contains(x,y) || pbf_->contains(y,x))
         return true;
       return false;
     }
+#endif
 
     void nbsend(GraphElem owner)
     {
@@ -579,8 +589,11 @@ class TriangulateAggrBufferedHash
                   break;
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
+
+#if defined(STORE_PG_INFO)
                 if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
                   continue;
+#endif
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
@@ -808,10 +821,12 @@ class TriangulateAggrBufferedHash
     MPI_Request *sreq_;
     char *stat_;
     Bloomfilter *ebf_;
+#if defined(STORE_PG_INFO)
 #if defined(USE_BLOOMF_PG)
     Bloomfilter *pbf_;
 #else
     MapVec *pbf_;
+#endif
 #endif
 
     std::vector<int> targets_;

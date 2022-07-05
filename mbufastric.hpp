@@ -159,6 +159,9 @@ class MapUniq
       }
     }
 
+    void reserve(const size_t count)
+    { data_.reserve(count); }
+
   private:
     GraphElem count_;
 #if defined(USE_STD_MAP_MAP)
