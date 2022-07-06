@@ -68,8 +68,8 @@ class Bloomfilter
       k_ = std::round((m_ / n_) * log(2));
 
       hashes_.resize(k_); 
-      bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), '1');
+      bits_.resize(m_+sizeof(GraphElem)*8);
+      std::fill(bits_.begin(), bits_.end(), '0');
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
@@ -84,8 +84,8 @@ class Bloomfilter
         k_ += 1;
 
       hashes_.resize(k_); 
-      bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), '1');
+      bits_.resize(m_+sizeof(GraphElem)*8);
+      std::fill(bits_.begin(), bits_.end(), '0');
 
       if (k_ == 0)
         throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
@@ -95,13 +95,13 @@ class Bloomfilter
     {
       hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
-        bits_[hashes_[k]] = '0';
+        bits_[hashes_[k]] = '1';
     }
 
     void print() const
     {
       std::cout << "-------------Bloom filter statistics-------------" << std::endl;
-      std::cout << "Number of Items (n): " << n_ << std::endl;
+      std::cout << "Maximum number of Items (n): " << n_ << std::endl;
       std::cout << "Probability of False Positives (p): " << p_ << std::endl;
       std::cout << "Number of bits in filter (m): " << m_ << std::endl;
       std::cout << "Number of hash functions (k): " << k_ << std::endl;
@@ -119,7 +119,7 @@ class Bloomfilter
       hash(i, j);
       for (GraphElem k = 0; k < k_; k++)
       {
-        if (bits_[hashes_[k]] == '1') 
+        if (bits_[hashes_[k]] == '0') 
           return false;
       }
       return true;
@@ -128,13 +128,22 @@ class Bloomfilter
     GraphElem nbits() const
     { return m_; }
 
+    const char* data() const
+    { return bits_.data(); }
+    
+    char* data()
+    { return bits_.data(); }
+    
     // "nucular" options, use iff 
     // you know what you're doing
-    void copy_from(char* source)
-    { std::memcpy(bits_.data(), source, m_); }
-      
-    void copy_to(char* dest)
+    void copy_from(char* dest)
     { std::memcpy(dest, bits_.data(), m_); }
+      
+    void copy_to(char* source)
+    { std::memcpy(bits_.data(), source, m_); }
+
+    void zfill() 
+    { std::fill(bits_.begin(), bits_.end(), '0'); }
 
   private:
     GraphElem n_, m_, k_;
@@ -428,6 +437,9 @@ class TriangulateAggrBufferedHash
         }
       }
     }
+
+    if (rank_ == 0)
+      ebf_->print();
 
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
