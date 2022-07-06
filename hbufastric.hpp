@@ -282,6 +282,9 @@ class TriangulateAggrBufferedHeuristics
       }
     }
 
+    if (rank_ == 0)
+      bf_->print();
+
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
