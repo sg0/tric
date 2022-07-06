@@ -199,7 +199,7 @@ class TriangulateAggrBufferedHeuristics
 #if defined(USE_OPENMP)
     GraphElem *vcount = new GraphElem[lnv];
     std::memset(vcount, 0, sizeof(GraphElem)*lnv);
-#pragma omp declare reduction(merge : std::vector<GraphElem> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+#pragma omp declare reduction(merge : std::vector<int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
 #pragma omp parallel for schedule(dynamic) reduction(merge: targets_) default(shared)           
     for (GraphElem i = 0; i < lnv; i++)
     {
@@ -638,17 +638,24 @@ class TriangulateAggrBufferedHeuristics
 
         tup[0] = rbuf_[k];
         GraphElem curr_count = 0;
+        volatile bool flag = false;
 
 #pragma omp parallel for firstprivate(tup) reduction(+:ntriangles_) reduction(-:in_nghosts_) \
         default(shared) schedule(dynamic) if ((count - (k + 1)) >= 10)
         for (GraphElem m = k + 1; m < count; m++)
         {
+          if(flag) 
+            continue;
+ 
           if (rbuf_[m] == -1)
           {
             curr_count = m + 1;
-            break;
+            flag = true;
           }
-
+          
+          if(flag) 
+            continue;
+          
           tup[1] = rbuf_[m];
 
           if (check_edgelist(tup))
