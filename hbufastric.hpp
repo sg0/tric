@@ -155,7 +155,10 @@ class TriangulateAggrBufferedHeuristics
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), bf_(nullptr), targets_(0), bufsize_(0)
+      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0)
+#if defined(USE_BLOOMFILTER_PG_HEUR)
+      , bf_(nullptr)
+#endif
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -166,6 +169,8 @@ class TriangulateAggrBufferedHeuristics
 
     vcount_ = new GraphElem[lnv]();
     erange_ = new GraphElem[nv*2]();
+    GraphElem *send_count  = new GraphElem[size_]();
+    GraphElem *recv_count  = new GraphElem[size_]();
 
     double t0 = MPI_Wtime();
 
@@ -191,6 +196,11 @@ class TriangulateAggrBufferedHeuristics
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
+#if defined(USE_OPENMP)
+    GraphElem *vcount = new GraphElem[lnv];
+    std::memset(vcount, 0, sizeof(GraphElem)*lnv);
+#pragma omp declare reduction(merge : std::vector<GraphElem> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+#pragma omp parallel for schedule(dynamic) reduction(merge: targets_) default(shared)           
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
@@ -201,29 +211,100 @@ class TriangulateAggrBufferedHeuristics
 
       for (GraphElem m = e0; m < e1-1; m++)
       {
-        EdgeStat& edge_m = g_->get_edge_stat(m);
+        EdgeStat const& edge_m = g_->get_edge_stat(m);
         const int owner = g_->get_owner(edge_m.edge_->tail_);
         tup[0] = edge_m.edge_->tail_;
-
         if (owner == rank_)
         {
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
+
             tup[1] = edge_n.tail_;
+            if (check_edgelist(tup))
+              vcount[i] += 1;
+          }
+        }
+        else
+        {
+          if (std::find(targets_.begin(), targets_.end(), owner) 
+              == targets_.end())
+            targets_.push_back(owner);
+
+          for (GraphElem n = m + 1; n < e1; n++)
+          {
+            Edge const& edge_n = g_->get_edge(n);
             
+            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+              break;
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+              continue;
+#if defined(USE_BLOOMFILTER_PG_HEUR)
+            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
+              continue;
+#endif  
+
+#pragma omp atomic update
+            send_count[owner] += 1;
+
+            vcount_[i] += 1;
+          }
+        }
+      }
+    }
+
+    ntriangles_ = std::accumulate(vcount, vcount + lnv, 0);
+    free(vcount);
+#else
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+      g_->edge_range(i, e0, e1);
+
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        EdgeStat const& edge_m = g_->get_edge_stat(m);
+        const int owner = g_->get_owner(edge_m.edge_->tail_);
+        tup[0] = edge_m.edge_->tail_;
+        if (owner == rank_)
+        {
+          for (GraphElem n = m + 1; n < e1; n++)
+          {
+            Edge const& edge_n = g_->get_edge(n);
+
+            tup[1] = edge_n.tail_;
             if (check_edgelist(tup))
               ntriangles_ += 1;
           }
         }
         else
-        {  
+        {
           if (std::find(targets_.begin(), targets_.end(), owner) 
               == targets_.end())
             targets_.push_back(owner);
+
+          for (GraphElem n = m + 1; n < e1; n++)
+          {
+            Edge const& edge_n = g_->get_edge(n);
+            
+            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
+              break;
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+              continue;
+#if defined(USE_BLOOMFILTER_PG_HEUR)
+            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
+              continue;
+#endif  
+            send_count[owner] += 1;
+            vcount_[i] += 1;
+          }
         }
       }
     }
+#endif
 
     MPI_Barrier(comm_);
 
@@ -245,13 +326,11 @@ class TriangulateAggrBufferedHeuristics
     
     t0 = MPI_Wtime();
 
-    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_, 0), rcounts(size_, 0);
-    std::vector<int> source_counts(size_, 0);
-    GraphElem *send_count  = new GraphElem[size_]();
-    GraphElem *recv_count  = new GraphElem[size_]();
-
     MPI_Barrier(comm_);
     
+#if defined(USE_BLOOMFILTER_PG_HEUR)
+    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_, 0), rcounts(size_, 0);
+    std::vector<int> source_counts(size_, 0);
     const int targets_size = targets_.size();
     MPI_Allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, comm_);
 
@@ -285,38 +364,15 @@ class TriangulateAggrBufferedHeuristics
     if (rank_ == 0)
       bf_->print();
 
-    for (GraphElem i = 0; i < lnv; i++)
-    {
-      GraphElem e0, e1, tup[2];
-      g_->edge_range(i, e0, e1);
-
-      if ((e0 + 1) == e1)
-        continue;
-
-      for (GraphElem m = e0; m < e1-1; m++)
-      {
-        EdgeStat& edge_m = g_->get_edge_stat(m);
-        const int owner = g_->get_owner(edge_m.edge_->tail_);
-
-        if (owner != rank_)
-        {  
-          for (GraphElem n = m + 1; n < e1; n++)
-          {
-            Edge const& edge_n = g_->get_edge(n);
-                            
-            if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
-              break;
-            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
-              continue;
-            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
-              continue;
-           
-            send_count[owner] += 1;
-            vcount_[i] += 1;
-          }
-        }
-      }
-    }
+    sdispls.clear();
+    rdispls.clear();
+    scounts.clear();
+    rcounts.clear();
+    sdispls.clear();
+    rdispls.clear();
+    source_counts.clear();
+    source_data.clear();
+#endif
 
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
@@ -361,23 +417,16 @@ class TriangulateAggrBufferedHeuristics
     
     delete []send_count;
     delete []recv_count;
-
-    sdispls.clear();
-    rdispls.clear();
-    scounts.clear();
-    rcounts.clear();
-    sdispls.clear();
-    rdispls.clear();
-    source_counts.clear();
-    source_data.clear();
   }
 
     ~TriangulateAggrBufferedHeuristics() {}
 
     void clear()
     {
+#if defined(USE_BLOOMFILTER_PG_HEUR)
       bf_->clear();
-
+      delete bf_;
+#endif
       delete []sbuf_;
       delete []rbuf_;
       delete []sbuf_ctr_;
@@ -387,12 +436,12 @@ class TriangulateAggrBufferedHeuristics
       delete []stat_;
       delete []vcount_;
       delete []erange_;
-      delete bf_;
 
       pindex_.clear();
       targets_.clear();
     }
 
+#if defined(USE_BLOOMFILTER_PG_HEUR)
     // x/y are processes
     inline bool is_connected_pes(GraphElem const& x, GraphElem const& y)
     {
@@ -400,6 +449,7 @@ class TriangulateAggrBufferedHeuristics
         return true;
       return false;
     }
+#endif
 
     void nbsend(GraphElem owner)
     {
@@ -466,9 +516,10 @@ class TriangulateAggrBufferedHeuristics
                   break;
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
+#if defined(USE_BLOOMFILTER_PG_HEUR)
                 if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
                   continue;
-
+#endif
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
                   prev_m_[pidx] = m;
@@ -572,6 +623,44 @@ class TriangulateAggrBufferedHeuristics
       else
         return;
 
+#if defined(USE_OPENMP)
+      while(1)
+      {
+        if (k == count)
+          break;
+
+        if (rbuf_[k] == -1)
+        {
+          k += 1;
+          prev = k;
+          continue;
+        }
+
+        tup[0] = rbuf_[k];
+        GraphElem curr_count = 0;
+
+#pragma omp parallel for firstprivate(tup) reduction(+:ntriangles_) reduction(-:in_nghosts_) \
+        default(shared) schedule(dynamic) if ((count - (k + 1)) >= 10)
+        for (GraphElem m = k + 1; m < count; m++)
+        {
+          if (rbuf_[m] == -1)
+          {
+            curr_count = m + 1;
+            break;
+          }
+
+          tup[1] = rbuf_[m];
+
+          if (check_edgelist(tup))
+            ntriangles_ += 1;
+
+          in_nghosts_ -= 1;
+        }
+
+        k += (curr_count - prev);
+        prev = k;
+      }
+#else
       while(1)
       {
         if (k == count)
@@ -606,6 +695,7 @@ class TriangulateAggrBufferedHeuristics
         k += (curr_count - prev);
         prev = k;
       }
+#endif
     }
 
     inline GraphElem count()
@@ -694,8 +784,9 @@ class TriangulateAggrBufferedHeuristics
     GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_;
     char *stat_;
+#if defined(USE_BLOOMFILTER_PG_HEUR)
     Bloomfilter *bf_;
-
+#endif
     std::vector<int> targets_;
 
     int rank_, size_;
