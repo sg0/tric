@@ -522,6 +522,7 @@ class TriangulateAggrBufferedHeuristics
       return false;
     }
      
+#if defined(USE_OPENMP)
     inline bool check_edgelist_omp(GraphElem tup[2])
     {
       GraphElem e0, e1;
@@ -541,6 +542,7 @@ class TriangulateAggrBufferedHeuristics
 
       return found;
     }
+#endif
 
     inline bool edge_between_range(GraphElem x, GraphElem y) const
     {
