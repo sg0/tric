@@ -205,6 +205,14 @@ class MapVec
     GraphElem size() const
     { return data_.size(); }
 
+    void reserve(const GraphElem count)
+    { 
+#if defined(USE_STD_MAP)
+#else
+      data_.reserve(count); 
+#endif
+    }
+
     void print() const
     {
       std::cout << "-------------Map statistics-------------" << std::endl;
@@ -359,6 +367,7 @@ class TriangulateAggrBufferedHash2
       ebf_ = new Bloomfilter(nedges*2);
 #else
       ebf_ = static_cast<MapVec*>(new MapVec());
+      ebf_->reserve(nedges*2);
 #endif
     }
 
