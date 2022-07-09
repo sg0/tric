@@ -66,22 +66,27 @@
 #elif defined(AGGR_BUFR) // aggregate buffered
 #include "bufastric.hpp"
 #elif defined(AGGR_BUFR_RMA)
+#error This version may hang due to a bug!!!
 #include "rmabufastric.hpp"
 #elif defined(AGGR_HEUR) // comm-avoiding heuristics
 #include "hbufastric.hpp"
-#elif defined(AGGR_HASH) // hash-based edge query
+#elif defined(AGGR_HASH) // one-way hash-based edge query + buffered comm
 #include "hashfastric.hpp"
-#elif defined(AGGR_PUSH) // hash-based edge query + buffered comm
+#elif defined(AGGR_HASH2) // one-way hash-based edge query + buffered comm
+#include "hashfastric2.hpp"
+#elif defined(AGGR_PUSH) // two-way hash-based edge query + buffered comm
 #include "bhashfastric.hpp"
-#elif defined(REMOTE_HASH) // hash-based edge query + bulk comm
+#elif defined(REMOTE_HASH) // one-way hash-based edge query + bulk comm
 #include "chashfastric.hpp"
 #elif defined(AGGR_MAP) // aggregate buffered + heuristics using map
 #include "mbufastric.hpp"
 #elif defined(STM8_ONESIDED)
+#error The logic of estimating counts is wrong, use another version!!!
 #include "estric.hpp"
 #elif defined(ESTIMATE_COUNTS)
+#error The logic of estimating counts is wrong, use another version!!!
 #include "es2tric.hpp"
-#else // aggregate compressed
+#else // aggregate compressed - high memory overhead
 #include "cfastric.hpp"
 #endif
 
@@ -186,7 +191,7 @@ int main(int argc, char *argv[])
   TriangulateEstimate tr(g);
 #elif defined(REMOTE_HASH)
   TriangulateHashRemote tr(g);
-#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_PUSH)
+#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
 #if defined(AGGR_BUFR)
@@ -197,6 +202,8 @@ int main(int argc, char *argv[])
   TriangulateAggrBufferedMap tr(g, bufferSize);
 #elif defined(AGGR_HASH)
   TriangulateAggrBufferedHash tr(g, bufferSize);
+#elif defined(AGGR_HASH2)
+  TriangulateAggrBufferedHash2 tr(g, bufferSize);
 #elif defined(AGGR_PUSH)
   TriangulateAggrBufferedHashPush tr(g, bufferSize);
 #else
@@ -227,7 +234,7 @@ int main(int argc, char *argv[])
     std::cout << "Number of triangles: " << ntris << std::endl;
 #endif
     else
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_PUSH)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
 
       std::cout << "User initialized per-PE buffer count: " << bufferSize << std::endl;
 #endif

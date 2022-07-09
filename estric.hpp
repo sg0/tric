@@ -53,6 +53,7 @@
 #define PTOL 0.0
 #endif
 
+
 class TriangulateEstimate
 {
     public:
