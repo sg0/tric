@@ -173,6 +173,7 @@ class MapVec
 
     inline void insert(GraphElem key, GraphElem value)
     {
+#if defined(USE_STD_MAP) || defined(USE_STD_UNO_MAP)
       if (data_.count(key) > 0)
       {
           data_[key].emplace_back(value);
@@ -185,20 +186,47 @@ class MapVec
         nkv_[0] += 1;
         nkv_[1] += 1;
       }
+#else
+      data_.insert({key, value});
+      nkv_[0] += 1;
+      nkv_[1] += 1;
+#endif
     }
 
     inline bool contains(GraphElem key, GraphElem value)
     {
+#if defined(USE_STD_MAP) || defined(USE_STD_UNO_MAP)
         if (std::find_if(data_[key].begin(), data_[key].end(), 
               [value](GraphElem const& element){ return element == value;}) == data_[key].end())
           return false;
       return true;
+#elif defined(USE_STD_UNO_MUMAP)
+      std::pair <std::unordered_multimap<GraphElem,GraphElem>::iterator, std::unordered_multimap<GraphElem,GraphElem>::iterator> ret;
+      ret = data_.equal_range(key);
+      for (std::unordered_multimap<GraphElem, GraphElem>::iterator it = ret.first; it != ret.second; ++it)
+      {
+        if (it->second == value)
+          return true;
+      }
+      return false;
+#else
+      std::pair <std::multimap<GraphElem,GraphElem>::iterator, std::multimap<GraphElem,GraphElem>::iterator> ret;
+      ret = data_.equal_range(key);
+      for (std::multimap<GraphElem, GraphElem>::iterator it = ret.first; it != ret.second; ++it)
+      {
+        if (it->second == value)
+          return true;
+      }
+      return false;
+#endif
     }
 
     inline void clear() 
     {
+#if defined(USE_STD_MAP) || defined(USE_STD_UNO_MAP)
       for (auto it = data_.begin(); it != data_.end(); ++it)
         it->second.clear();
+#endif
       data_.clear();
     }
 
@@ -208,8 +236,9 @@ class MapVec
     void reserve(const GraphElem count)
     { 
 #if defined(USE_STD_MAP)
-#else
+#elif defined(USE_STD_UNO_MAP) || defined(USE_STD_UNO_MUMAP)
       data_.reserve(count); 
+#else
 #endif
     }
 
@@ -223,8 +252,12 @@ class MapVec
   private:
 #if defined(USE_STD_MAP)
     std::map<GraphElem, std::vector<GraphElem>> data_;
-#else
+#elif defined(USE_STD_UNO_MAP)
     std::unordered_map<GraphElem, std::vector<GraphElem>> data_;
+#elif defined(USE_STD_UNO_MUMAP)
+    std::unordered_multimap<GraphElem, GraphElem> data_;
+#else
+    std::multimap<GraphElem, GraphElem> data_;
 #endif
     std::array<GraphElem,2> nkv_;
 };
