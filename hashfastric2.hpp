@@ -213,7 +213,11 @@ class MapVec
       std::cout << "----------------------------------------" << std::endl;
     }   
   private:
-    std::unordered_map<GraphElem,std::vector<GraphElem>> data_;
+#if defined(USE_STD_MAP)
+    std::map<GraphElem, std::vector<GraphElem>> data_;
+#else
+    std::unordered_map<GraphElem, std::vector<GraphElem>> data_;
+#endif
     std::array<GraphElem,2> nkv_;
 };
 

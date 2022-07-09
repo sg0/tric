@@ -49,6 +49,7 @@
 #include <sstream>
 #include <climits>
 #include <array>
+#include <map>
 #include <unordered_map>
 
 #include <mpi.h>
