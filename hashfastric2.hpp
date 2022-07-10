@@ -164,6 +164,16 @@ class Bloomfilter
     std::vector<uint64_t> hashes_;
 };
 
+#if defined(USE_STD_UNO_MUSET) 
+struct pair_hash {
+  inline std::size_t operator()(const std::pair<GraphElem,GraphElem> & v) const {
+    GraphElem key[2] = {v.first, v.second}, hashes[2] = {0,0};
+    MurmurHash3_x64_128 ( key, 2*sizeof(GraphElem), 0, hashes );
+    return hashes[0] ^ hashes[1];
+  }
+};
+#endif
+
 class MapVec
 {
   public:
@@ -173,7 +183,15 @@ class MapVec
 
     inline void insert(GraphElem key, GraphElem value)
     {
-#if defined(USE_STD_MAP) || defined(USE_STD_UNO_MAP)
+#if defined(USE_STD_MUMAP) || defined(USE_STD_UNO_MUMAP)
+      data_.insert({key, value});
+      nkv_[0] += 1;
+      nkv_[1] += 1;
+#elif defined(USE_STD_UNO_MUSET)
+      data_.insert(std::make_pair(key, value));
+      nkv_[0] += 1;
+      nkv_[1] += 1;
+#else
       if (data_.count(key) > 0)
       {
           data_[key].emplace_back(value);
@@ -186,21 +204,12 @@ class MapVec
         nkv_[0] += 1;
         nkv_[1] += 1;
       }
-#else
-      data_.insert({key, value});
-      nkv_[0] += 1;
-      nkv_[1] += 1;
 #endif
     }
 
     inline bool contains(GraphElem key, GraphElem value)
     {
-#if defined(USE_STD_MAP) || defined(USE_STD_UNO_MAP)
-        if (std::find_if(data_[key].begin(), data_[key].end(), 
-              [value](GraphElem const& element){ return element == value;}) == data_[key].end())
-          return false;
-      return true;
-#elif defined(USE_STD_UNO_MUMAP)
+#if defined(USE_STD_UNO_MUMAP)
       std::pair <std::unordered_multimap<GraphElem,GraphElem>::iterator, std::unordered_multimap<GraphElem,GraphElem>::iterator> ret;
       ret = data_.equal_range(key);
       for (std::unordered_multimap<GraphElem, GraphElem>::iterator it = ret.first; it != ret.second; ++it)
@@ -209,7 +218,13 @@ class MapVec
           return true;
       }
       return false;
-#else
+#elif defined(USE_STD_UNO_MUSET)
+      std::pair<GraphElem, GraphElem> pr = std::make_pair(key, value);   
+      if (std::find_if(data_.begin(), data_.end(), 
+              [pr](std::pair<GraphElem, GraphElem> const& prelem){ return prelem.first == pr.first && prelem.second == pr.second;}) == data_.end())
+          return false;
+      return true;
+#elif defined(USE_STD_MUMAP)
       std::pair <std::multimap<GraphElem,GraphElem>::iterator, std::multimap<GraphElem,GraphElem>::iterator> ret;
       ret = data_.equal_range(key);
       for (std::multimap<GraphElem, GraphElem>::iterator it = ret.first; it != ret.second; ++it)
@@ -218,12 +233,17 @@ class MapVec
           return true;
       }
       return false;
+#else
+      if (std::find_if(data_[key].begin(), data_[key].end(), 
+            [value](GraphElem const& element){ return element == value;}) == data_[key].end())
+        return false;
+      return true;
 #endif
     }
 
     inline void clear() 
     {
-#if defined(USE_STD_MAP) || defined(USE_STD_UNO_MAP)
+#if !defined(USE_STD_UNO_MUMAP) || !defined(USE_STD_UNO_MUSET) || !defined(USE_STD_MUMAP)
       for (auto it = data_.begin(); it != data_.end(); ++it)
         it->second.clear();
 #endif
@@ -235,10 +255,9 @@ class MapVec
 
     void reserve(const GraphElem count)
     { 
-#if defined(USE_STD_MAP)
-#elif defined(USE_STD_UNO_MAP) || defined(USE_STD_UNO_MUMAP)
-      data_.reserve(count); 
+#if defined(USE_STD_MAP) || defined(USE_STD_MUMAP)
 #else
+      data_.reserve(count); 
 #endif
     }
 
@@ -252,12 +271,14 @@ class MapVec
   private:
 #if defined(USE_STD_MAP)
     std::map<GraphElem, std::vector<GraphElem>> data_;
-#elif defined(USE_STD_UNO_MAP)
-    std::unordered_map<GraphElem, std::vector<GraphElem>> data_;
+#elif defined(USE_STD_MUMAP)
+    std::multimap<GraphElem, GraphElem> data_;
 #elif defined(USE_STD_UNO_MUMAP)
     std::unordered_multimap<GraphElem, GraphElem> data_;
+#elif defined(USE_STD_UNO_MUSET)
+    std::unordered_multiset<std::pair<GraphElem, GraphElem>, pair_hash> data_;
 #else
-    std::multimap<GraphElem, GraphElem> data_;
+    std::unordered_map<GraphElem, std::vector<GraphElem>> data_;
 #endif
     std::array<GraphElem,2> nkv_;
 };
@@ -398,6 +419,8 @@ class TriangulateAggrBufferedHash2
     {
 #if defined(USE_BLOOMFILTER) 
       ebf_ = new Bloomfilter(nedges*2);
+      if (rank_ == 0)
+        ebf_.print();
 #else
       ebf_ = static_cast<MapVec*>(new MapVec());
       ebf_->reserve(nedges*2);
