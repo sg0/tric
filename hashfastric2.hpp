@@ -420,7 +420,7 @@ class TriangulateAggrBufferedHash2
 #if defined(USE_BLOOMFILTER) 
       ebf_ = new Bloomfilter(nedges*2);
       if (rank_ == 0)
-        ebf_.print();
+        ebf_->print();
 #else
       ebf_ = static_cast<MapVec*>(new MapVec());
       ebf_->reserve(nedges*2);
