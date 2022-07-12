@@ -67,8 +67,11 @@ class Bloomfilter
       m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
       k_ = std::round((m_ / n_) * log(2));
 
+      if (k_%2 != 0)
+        k_ += 1;
+
       hashes_.resize(k_); 
-      bits_.resize(m_+sizeof(GraphElem)*8);
+      bits_.resize(m_);
       std::fill(bits_.begin(), bits_.end(), '0');
 
       if (k_ == 0)
@@ -84,7 +87,7 @@ class Bloomfilter
         k_ += 1;
 
       hashes_.resize(k_); 
-      bits_.resize(m_+sizeof(GraphElem)*8);
+      bits_.resize(m_);
       std::fill(bits_.begin(), bits_.end(), '0');
 
       if (k_ == 0)
@@ -369,25 +372,25 @@ class TriangulateAggrBufferedHash2
                 ntriangles_ += 1;
             }
           }
-          
-          int past_target = -1;
+
           GraphElem l0, l1;
+          bool is_remote = false;
           const GraphElem lv = g_->global_to_local(edge_m.tail_);
+
           g_->edge_range(lv, l0, l1);
-          
+
           for (GraphElem l = l0; l < l1; l++)
           {
             Edge const& edge = g_->get_edge(l);
-            const int target = g_->get_owner(edge.tail_);
-            if (target != rank_)
+            if (g_->get_owner(edge.tail_) != rank_)
             {
-              if (target != past_target)
-              {
-                nedges += 1;
-                past_target = target;
-              }
+              is_remote = true;
+              break;
             }
           }
+
+          if (is_remote)
+            nedges += 1;
         }
       }
     }
@@ -462,24 +465,22 @@ class TriangulateAggrBufferedHash2
         }
         else
         {
-          int past_target = -1;
           GraphElem l0, l1;
+          bool is_remote = false;
           const GraphElem lv = g_->global_to_local(edge_m.tail_);
           g_->edge_range(lv, l0, l1);
-          
           for (GraphElem l = l0; l < l1; l++)
           {
             Edge const& edge = g_->get_edge(l);
-            const int target = g_->get_owner(edge.tail_);
-            if (target != rank_)
+            if (g_->get_owner(edge.tail_) != rank_)
             {
-              if (target != past_target)
-              {
-                ebf_->insert(g_->local_to_global(i), edge_m.tail_);
-                past_target = target;
-              }
+              is_remote = true;
+              break;
             }
           }
+
+          if (is_remote)
+            ebf_->insert(g_->local_to_global(i), edge_m.tail_);
         }
       }
     }
@@ -493,9 +494,8 @@ class TriangulateAggrBufferedHash2
       in_nghosts_ += recv_count[p];
     }
     
-    nghosts_ = out_nghosts_ + in_nghosts_;
-
-    bufsize_ = ((nghosts_*3) < bufsize) ? (nghosts_*3) : bufsize;
+    nghosts_ = MAX(out_nghosts_, in_nghosts_);
+    bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
     if (rank_ == 0)

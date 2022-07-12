@@ -66,9 +66,12 @@ class Bloomfilter
     {
       m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
       k_ = std::round((m_ / n_) * log(2));
+      
+      if (k_%2 != 0)
+        k_ += 1;
 
       hashes_.resize(k_); 
-      bits_.resize(m_+sizeof(GraphElem)*8);
+      bits_.resize(m_);
       std::fill(bits_.begin(), bits_.end(), '0');
 
       if (k_ == 0)
@@ -84,7 +87,7 @@ class Bloomfilter
         k_ += 1;
 
       hashes_.resize(k_); 
-      bits_.resize(m_+sizeof(GraphElem)*8);
+      bits_.resize(m_);
       std::fill(bits_.begin(), bits_.end(), '0');
 
       if (k_ == 0)
@@ -356,6 +359,7 @@ class TriangulateAggrBufferedHash
     
     if (nedges) 
       ebf_ = new Bloomfilter(nedges*2);
+      //ebf_ = new Bloomfilter(nedges*2, 10, 1.0E-5);
 
 #if defined(STORE_PG_INFO)
 #if defined(USE_BLOOMF_PG)
