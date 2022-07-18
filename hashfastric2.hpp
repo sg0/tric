@@ -452,12 +452,13 @@ class TriangulateAggrBufferedHash2
             for (GraphElem n = m + 1; n < e1; n++)
             {
               Edge const& edge_n = g_->get_edge(n);
-
+#if defined(DISABLE_EDGE_RANGE_CHECKS)
+#else
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
               if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
                 continue;
-
+#endif
               send_count[owner] += 1;
               vcount_[i] += 1;
             }
@@ -612,13 +613,14 @@ class TriangulateAggrBufferedHash2
 
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
               {  
-                Edge const& edge_n = g_->get_edge(n);                                
-                                
+                Edge const& edge_n = g_->get_edge(n);                                                     
+#if defined(DISABLE_EDGE_RANGE_CHECKS)
+#else           
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
                   continue;
-
+#endif
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
                   prev_m_[pidx] = m;
@@ -747,7 +749,11 @@ class TriangulateAggrBufferedHash2
 
           tup[1] = rbuf_[m];
 
+#if defined(DEFAULT_EDGE_QUERY)
+          if (check_edgelist(tup))
+#else
           if (ebf_->contains(tup[0], tup[1]))
+#endif
             ntriangles_ += 1;
 
           in_nghosts_ -= 1;
