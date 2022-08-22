@@ -56,6 +56,10 @@
 #define BLOOMFILTER_TOL 1E-09
 #endif
 
+#ifndef COMM_BUFSIZE 
+#define COMM_BUFSIZE (262144)
+#endif
+
 #include "murmurhash/MurmurHash3.h"
 
 class Bloomfilter
@@ -171,7 +175,7 @@ class TriangulateHashRemote
 {
   public:
 
-    TriangulateHashRemote(Graph* g): 
+    TriangulateHashRemote(Graph* g, const GraphElem combufsize=COMM_BUFSIZE): 
       g_(g), pdegree_(0), erange_(nullptr), ntriangles_(0), pindex_(0), 
       sebf_(nullptr), rebf_(nullptr), targets_(0)
   {
@@ -296,7 +300,14 @@ class TriangulateHashRemote
     
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
-     
+    
+    if (combufsize_ != -1)
+    { 
+      combufsize_ = (nedges*2 < combufsize_) ? nedges*2 : combufsize_;
+      combufsize_ = (combufsize_ % 2 == 0) ? combufsize_ : combufsize_ + 1;
+      MPI_Allreduce(MPI_IN_PLACE, &combufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+    }
+
     MPI_Barrier(comm_);
 
 
@@ -309,6 +320,8 @@ class TriangulateHashRemote
     {   
       std::cout << "Average time for local counting during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << std::endl;
+      if (combufsize_ != -1)
+        std::cout << "Adjusted Per-PE communication buffer count: " << combufsize_ << std::endl;
     }
 
     // neighbor topology
@@ -332,7 +345,10 @@ class TriangulateHashRemote
     {
       if (send_count[p] > 0)
       {
-        sebf_[pindex_[p]] = new Bloomfilter(send_count[p]*2);
+        if (combufsize_ == -1)
+          sebf_[pindex_[p]] = new Bloomfilter(send_count[p]*2);
+        else
+          sebf_[pindex_[p]] = new Bloomfilter(combufsize_);
         scounts[pindex_[p]] = sebf_[pindex_[p]]->nbits();
 #if defined(USE_ALLTOALLV)
         sdisp += scounts[pindex_[p]];
@@ -341,7 +357,10 @@ class TriangulateHashRemote
 
       if (recv_count[p] > 0)
       {
+        if (combufsize_ == -1)
         rebf_[pindex_[p]] = new Bloomfilter(recv_count[p]*2);
+        else
+          rebf_[pindex_[p]] = new Bloomfilter(combufsize_);
         rcounts[pindex_[p]] = rebf_[pindex_[p]]->nbits();
 #if defined(USE_ALLTOALLV)
         rdisp += rcounts[pindex_[p]];
@@ -351,6 +370,9 @@ class TriangulateHashRemote
     
     t0 = MPI_Wtime();
 
+    if ((rank_ == 0) && (combufsize_ != -1))
+      sebf_[0]->print();   
+    
     MPI_Barrier(comm_);
   
     // store edges in bloomfilter
@@ -629,7 +651,7 @@ class TriangulateHashRemote
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, pdegree_;
+    GraphElem ntriangles_, pdegree_, combufsize_;
     GraphElem *erange_;
     Bloomfilter **sebf_, **rebf_;
 
