@@ -246,7 +246,7 @@ class MapVec
 
     inline void clear() 
     {
-#if !defined(USE_STD_UNO_MUMAP) || !defined(USE_STD_UNO_MUSET) || !defined(USE_STD_MUMAP)
+#if !defined(USE_STD_UNO_MUMAP) && !defined(USE_STD_UNO_MUSET) && !defined(USE_STD_MUMAP)
       for (auto it = data_.begin(); it != data_.end(); ++it)
         it->second.clear();
 #endif

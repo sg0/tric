@@ -56,6 +56,10 @@
 #define BLOOMFILTER_TOL 1E-09
 #endif
 
+#ifndef COMM_BUFSIZE 
+#define COMM_BUFSIZE (262144)
+#endif
+
 #include "murmurhash/MurmurHash3.h"
 
 class Bloomfilter
@@ -168,11 +172,11 @@ class TriangulateAggrBufferedHashPush
 {
   public:
 
-    TriangulateAggrBufferedHashPush(Graph* g, const GraphElem bufsize): 
+    TriangulateAggrBufferedHashPush(Graph* g, const GraphElem bufsize, const GraphElem combufsize=COMM_BUFSIZE): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
       sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0) 
+      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0), combufsize_(combufsize) 
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -311,18 +315,25 @@ class TriangulateAggrBufferedHashPush
     bufsize_ = (bufsize_ % 2 == 0) ? bufsize_ : bufsize_ + 1;
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
+    combufsize_ = ((MAX(out_nghosts_, in_nghosts_)) < combufsize) ? (MAX(out_nghosts_, in_nghosts_)) : combufsize;
+    combufsize_ = (combufsize_ % 2 == 0) ? combufsize_ : combufsize_ + 1;
+    MPI_Allreduce(MPI_IN_PLACE, &combufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+
     sbuf_ = new Bloomfilter*[pdegree_]; 
-    rbuf_ = new Bloomfilter(bufsize_); 
+    rbuf_ = new Bloomfilter(combufsize_); 
 
     for (GraphElem p = 0; p < pdegree_; p++)
-      sbuf_[p] = new Bloomfilter(bufsize_);
+      sbuf_[p] = new Bloomfilter(combufsize_);
 
     if (rank_ == 0)
       sbuf_[0]->print();   
 
     if (rank_ == 0)
+    {
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
- 
+      std::cout << "Adjusted Per-PE communication buffer count: " << combufsize_ << std::endl;
+    }
+
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
@@ -639,7 +650,7 @@ class TriangulateAggrBufferedHashPush
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
+    GraphElem ntriangles_, combufsize_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
     GraphElem *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     Bloomfilter **sbuf_, *rbuf_; 
     MPI_Request *sreq_;
