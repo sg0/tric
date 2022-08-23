@@ -418,7 +418,19 @@ class TriangulateHashRemote
     }
  
     MPI_Barrier(comm_);
-   
+       
+    t1 = MPI_Wtime();
+    double it_tot = t1 - t0, tt_tot = 0.0;
+
+    MPI_Reduce(&it_tot, &tt_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
+
+    if (rank_ == 0) 
+    {   
+      std::cout << "Average time for local bloomfilter insertions (secs.): " 
+        << ((double)(tt_tot / (double)size_)) << std::endl;
+    }
+
+
 #if defined(USE_ALLTOALLV) 
     char *sbuf = new char[sdisp];
     char *rbuf = new char[rdisp];
@@ -591,10 +603,13 @@ class TriangulateHashRemote
             for (GraphElem n = m + 1; n < e1; n++)
             {
               Edge const& edge_n = g_->get_edge(n);
+#if defined(DISABLE_EDGE_RANGE_CHECKS)
+#else
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
               if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
                 continue;
+#endif
               if (rebf_[pidx]->contains(edge_m.tail_, edge_n.tail_))
               {
                 ntriangles_ += 1;
