@@ -419,18 +419,6 @@ class TriangulateHashRemote
  
     MPI_Barrier(comm_);
        
-    t1 = MPI_Wtime();
-    double it_tot = t1 - t0, tt_tot = 0.0;
-
-    MPI_Reduce(&it_tot, &tt_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
-
-    if (rank_ == 0) 
-    {   
-      std::cout << "Average time for local bloomfilter insertions (secs.): " 
-        << ((double)(tt_tot / (double)size_)) << std::endl;
-    }
-
-
 #if defined(USE_ALLTOALLV) 
     char *sbuf = new char[sdisp];
     char *rbuf = new char[rdisp];
@@ -527,6 +515,17 @@ class TriangulateHashRemote
 #endif
       MPI_Barrier(comm_);
     } // end of batches
+
+    t1 = MPI_Wtime();
+    double it_tot = t1 - t0, tt_tot = 0.0;
+
+    MPI_Reduce(&it_tot, &tt_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
+
+    if (rank_ == 0) 
+    {   
+      std::cout << "Average time for local bloomfilter insertions and exchange (secs.): " 
+        << ((double)(tt_tot / (double)size_)) << std::endl;
+    }
 
 #if defined(DEBUG_PRINTF)
     if (rank_ == 0)
