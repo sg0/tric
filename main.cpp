@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
 #elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
   TriangulateEstimate tr(g);
 #elif defined(REMOTE_HASH)
-  TriangulateHashRemote tr(g);
+  TriangulateHashRemote tr(g, bufferSize);
 #elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
