@@ -175,9 +175,9 @@ class TriangulateHashRemote
 {
   public:
 
-    TriangulateHashRemote(Graph* g, const GraphElem combufsize=COMM_BUFSIZE): 
+    TriangulateHashRemote(Graph* g, const GraphElem combufsize=-1): 
       g_(g), pdegree_(0), erange_(nullptr), ntriangles_(0), pindex_(0), 
-      sebf_(nullptr), rebf_(nullptr), targets_(0)
+      sebf_(nullptr), rebf_(nullptr), targets_(0), combufsize_(combufsize)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -358,7 +358,7 @@ class TriangulateHashRemote
       if (recv_count[p] > 0)
       {
         if (combufsize_ == -1)
-        rebf_[pindex_[p]] = new Bloomfilter(recv_count[p]*2);
+          rebf_[pindex_[p]] = new Bloomfilter(recv_count[p]*2);
         else
           rebf_[pindex_[p]] = new Bloomfilter(combufsize_);
         rcounts[pindex_[p]] = rebf_[pindex_[p]]->nbits();
