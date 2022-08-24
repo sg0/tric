@@ -339,25 +339,19 @@ class TriangulateHashRemote
 
     std::vector<GraphElem> scounts(pdegree_,0), rcounts(pdegree_,0);
 
-    for (GraphElem p = 0; p < size_; p++)
+    for (GraphElem p = 0; p < pdegree_; p++)
     {
-      if (send_count[p] > 0)
-      {
         if (combufsize_ == -1)
-          sebf_[pindex_[p]] = new Bloomfilter(send_count[p]*2);
+          sebf_[p] = new Bloomfilter(send_count[targets_[p]]*2);
         else
-          sebf_[pindex_[p]] = new Bloomfilter(combufsize_);
-        scounts[pindex_[p]] = sebf_[pindex_[p]]->nbits();
-      }
+          sebf_[p] = new Bloomfilter(combufsize_);
+        scounts[p] = sebf_[p]->nbits();
 
-      if (recv_count[p] > 0)
-      {
         if (combufsize_ == -1)
-          rebf_[pindex_[p]] = new Bloomfilter(recv_count[p]*2);
+          rebf_[p] = new Bloomfilter(recv_count[targets_[p]]*2);
         else
-          rebf_[pindex_[p]] = new Bloomfilter(combufsize_);
-        rcounts[pindex_[p]] = rebf_[pindex_[p]]->nbits();
-      }
+          rebf_[p] = new Bloomfilter(combufsize_);
+        rcounts[p] = rebf_[p]->nbits();
     }
     
     t0 = MPI_Wtime();
