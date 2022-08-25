@@ -100,7 +100,7 @@ static GraphWeight randomEdgePercent = 0.0;
 static bool randomNumberLCG = false;
 static bool estimateTriangles = false;
 static bool bufferSet = false;
-static long bufferSize = 0;
+static long bufferSize = -1;
 
 // parse command line parameters
 static void parseCommandLine(const int argc, char * const argv[]);

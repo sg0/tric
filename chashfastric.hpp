@@ -358,8 +358,8 @@ class TriangulateHashRemote
     
     sbuf_ = new char[sdisp];
     rbuf_ = new char[rdisp];
-    std::memset(sbuf_, 0, sdisp);
-    std::memset(rbuf_, 0, rdisp);
+    std::memset(sbuf_, '0', sdisp);
+    std::memset(rbuf_, '0', rdisp);
 
     for (GraphElem p = 0; p < pdegree_; p++)
     {
@@ -412,9 +412,38 @@ class TriangulateHashRemote
     }
  
     MPI_Barrier(comm_);
-       
+
+#if defined(USE_NBR_ALLTOALLV)
     MPI_Neighbor_alltoallv(sbuf_, (int*)scounts.data(), (int*)sdispl.data(), MPI_CHAR, rbuf_, (int*)rcounts.data(), (int*)rdispl.data(), MPI_CHAR, gcomm_);
+#else
+    // extra neighbor function calls for demo purposes
+    int indegree, outdegree, weighted;
     
+    MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
+    
+    int *srcs = (int*)malloc(indegree*sizeof(int));
+    int *dsts = (int*)malloc(outdegree*sizeof(int));
+    
+    MPI_Dist_graph_neighbors(gcomm_, indegree, srcs, MPI_UNWEIGHTED,
+        outdegree, dsts, MPI_UNWEIGHTED);
+
+    MPI_Request *sreqs = (MPI_Request*)malloc(outdegree*sizeof(MPI_Request));
+    MPI_Request *rreqs = (MPI_Request*)malloc(indegree*sizeof(MPI_Request));
+
+    for (int p = 0; p < outdegree; p++)
+      MPI_Isend(sbuf_ + sdispl[p]*sizeof(char), scounts[p], MPI_CHAR, dsts[p], TAG_DATA, gcomm_, &sreqs[p]);
+
+    for (int p = 0; p < indegree; p++)
+      MPI_Irecv(rbuf_ + rdispl[p]*sizeof(char), rcounts[p], MPI_CHAR, srcs[p], TAG_DATA, gcomm_, &rreqs[p]);
+
+    MPI_Waitall(outdegree, sreqs, MPI_STATUSES_IGNORE);
+    MPI_Waitall(indegree, rreqs, MPI_STATUSES_IGNORE);
+
+    free(srcs);
+    free(dsts);
+    free(sreqs);
+    free(rreqs);
+#endif
     MPI_Barrier(comm_);
 
     t1 = MPI_Wtime();
