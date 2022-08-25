@@ -287,19 +287,23 @@ class TriangulateHashRemote
     }
 
     assert(nedges == std::accumulate(send_count, send_count + size_, 0));
-    
-    // outgoing/incoming data and buffer size
-    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
-    
+      
     if (combufsize_ != -1)
     { 
-      combufsize_ = (nedges*2 < combufsize_) ? nedges*2 : combufsize_;
       combufsize_ = (combufsize_ % 2 == 0) ? combufsize_ : combufsize_ + 1;
-      MPI_Allreduce(MPI_IN_PLACE, &combufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
+      for (int p : targets_)
+        send_count[p] = MIN(send_count[p]*2, combufsize_);
+    }
+    else
+    {
+      for (int p : targets_)
+        send_count[p] *= 2; 
     }
 
+    // outgoing/incoming data and buffer size
+    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
+ 
     MPI_Barrier(comm_);
-
 
     double t1 = MPI_Wtime();
     double p_tot = t1 - t0, t_tot = 0.0;
@@ -316,8 +320,8 @@ class TriangulateHashRemote
 
     // neighbor topology
     MPI_Dist_graph_create_adjacent(comm_, targets_.size(), targets_.data(), 
-        MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
-        MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
+       MPI_UNWEIGHTED, targets_.size(), targets_.data(), MPI_UNWEIGHTED, 
+       MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
 
     pdegree_ = targets_.size();
 
@@ -334,18 +338,12 @@ class TriangulateHashRemote
 
     for (GraphElem p = 0; p < pdegree_; p++)
     {
-        if (combufsize_ == -1)
-          sebf_[p] = new Bloomfilter(send_count[targets_[p]]*2);
-        else
-          sebf_[p] = new Bloomfilter(combufsize_);
+        sebf_[p] = new Bloomfilter(send_count[targets_[p]]);
         scounts[p] = sebf_[p]->nbits();
         sdispl[p] = sdisp;
         sdisp += scounts[p];
 
-        if (combufsize_ == -1)
-          rebf_[p] = new Bloomfilter(recv_count[targets_[p]]*2);
-        else
-          rebf_[p] = new Bloomfilter(combufsize_);
+        rebf_[p] = new Bloomfilter(recv_count[targets_[p]]);
         rcounts[p] = rebf_[p]->nbits();
         rdispl[p] = rdisp;
         rdisp += rcounts[p];
@@ -353,7 +351,7 @@ class TriangulateHashRemote
     
     t0 = MPI_Wtime();
 
-    if ((rank_ == 0) && (combufsize_ != -1))
+    if (rank_ == 0)
       sebf_[0]->print();   
     
     sbuf_ = new char[sdisp];
