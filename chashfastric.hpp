@@ -326,6 +326,8 @@ class TriangulateHashRemote
   
     sebf_ = new Bloomfilter*[pdegree_]; 
     rebf_ = new Bloomfilter*[pdegree_]; 
+    
+    MPI_Barrier(comm_);
 
     GraphElem sdisp = 0, rdisp = 0;
     std::vector<GraphElem> scounts(pdegree_,0), rcounts(pdegree_,0), sdispl(pdegree_,0), rdispl(pdegree_,0);
