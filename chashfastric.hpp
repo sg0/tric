@@ -56,10 +56,6 @@
 #define BLOOMFILTER_TOL 1E-09
 #endif
 
-#ifndef COMM_BUFSIZE 
-#define COMM_BUFSIZE (262144)
-#endif
-
 #include "murmurhash/MurmurHash3.h"
 
 class Bloomfilter
@@ -315,7 +311,7 @@ class TriangulateHashRemote
       std::cout << "Average time for local counting during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << std::endl;
       if (combufsize_ != -1)
-        std::cout << "Adjusted Per-PE communication buffer count: " << combufsize_ << std::endl;
+        std::cout << "Adjusted maximum per-PE communication buffer count: " << combufsize_ << std::endl;
     }
 
     // neighbor topology
@@ -334,7 +330,7 @@ class TriangulateHashRemote
     MPI_Barrier(comm_);
 
     GraphElem sdisp = 0, rdisp = 0;
-    std::vector<GraphElem> scounts(pdegree_,0), rcounts(pdegree_,0), sdispl(pdegree_,0), rdispl(pdegree_,0);
+    std::vector<int> scounts(pdegree_,0), rcounts(pdegree_,0), sdispl(pdegree_,0), rdispl(pdegree_,0);
 
     for (GraphElem p = 0; p < pdegree_; p++)
     {
@@ -352,8 +348,11 @@ class TriangulateHashRemote
     t0 = MPI_Wtime();
 
     if (rank_ == 0)
+    {
+      std::cout << "Bloom Filter details for PE #0:" << std::endl;
       sebf_[0]->print();   
-    
+    }
+
     sbuf_ = new char[sdisp];
     rbuf_ = new char[rdisp];
     std::memset(sbuf_, '0', sdisp);
@@ -364,13 +363,11 @@ class TriangulateHashRemote
       sebf_[p]->set(sbuf_ + sdispl[p]);
       rebf_[p]->set(rbuf_ + rdispl[p]);
     }
-    
-    MPI_Barrier(comm_);
-  
+
     // store edges in bloomfilter
     for (GraphElem i = 0; i < lnv; i++)
     {
-      GraphElem e0, e1, tup[2];
+      GraphElem e0, e1;
       g_->edge_range(i, e0, e1);
 
       if ((e0 + 1) == e1)
@@ -408,11 +405,12 @@ class TriangulateHashRemote
         }
       }
     }
- 
+
     MPI_Barrier(comm_);
 
 #if defined(USE_NBR_ALLTOALLV)
-    MPI_Neighbor_alltoallv(sbuf_, (int*)scounts.data(), (int*)sdispl.data(), MPI_CHAR, rbuf_, (int*)rcounts.data(), (int*)rdispl.data(), MPI_CHAR, gcomm_);
+    MPI_Neighbor_alltoallv(sbuf_, scounts.data(), sdispl.data(), MPI_CHAR, 
+        rbuf_, rcounts.data(), rdispl.data(), MPI_CHAR, gcomm_);
 #else
     // extra neighbor function calls for demo purposes
     int indegree, outdegree, weighted;
@@ -429,10 +427,10 @@ class TriangulateHashRemote
     MPI_Request *rreqs = (MPI_Request*)malloc(indegree*sizeof(MPI_Request));
 
     for (int p = 0; p < outdegree; p++)
-      MPI_Isend(sbuf_ + sdispl[p]*sizeof(char), scounts[p], MPI_CHAR, dsts[p], TAG_DATA, gcomm_, &sreqs[p]);
+      MPI_Isend(sbuf_ + sdispl[p], scounts[p], MPI_CHAR, dsts[p], TAG_DATA, comm_, &sreqs[p]);
 
     for (int p = 0; p < indegree; p++)
-      MPI_Irecv(rbuf_ + rdispl[p]*sizeof(char), rcounts[p], MPI_CHAR, srcs[p], TAG_DATA, gcomm_, &rreqs[p]);
+      MPI_Irecv(rbuf_ + rdispl[p], rcounts[p], MPI_CHAR, srcs[p], TAG_DATA, comm_, &rreqs[p]);
 
     MPI_Waitall(outdegree, sreqs, MPI_STATUSES_IGNORE);
     MPI_Waitall(indegree, rreqs, MPI_STATUSES_IGNORE);
