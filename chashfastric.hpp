@@ -360,7 +360,7 @@ class TriangulateHashRemote
     sbuf_ = new char[sdisp];
     rbuf_ = new char[rdisp];
     std::memset(sbuf_, 0, sdisp);
-    std::memset(rbuf_, 0, sdisp);
+    std::memset(rbuf_, 0, rdisp);
 
     for (GraphElem p = 0; p < pdegree_; p++)
     {
