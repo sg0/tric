@@ -127,9 +127,6 @@ class Bloomfilter
     void set(char *ptr) { bits_ = ptr; }
     GraphElem nbits() const { return m_; }
     
-    char* data() { return bits_; }
-    char const* data() const { return bits_; }
-
     // "nucular" options, use iff 
     // you know what you're doing
     void copy_from(char* dest)
