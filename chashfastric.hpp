@@ -120,7 +120,8 @@ class Bloomfilter
 
     // objects must eventually call `set for
     // avoiding undefined behavior 
-    void set(char *ptr) { bits_ = ptr; }
+    void set(char *ptr) { bits_ = new (ptr) char(m_); }
+
     GraphElem nbits() const { return m_; }
     
     // "nucular" options, use iff 
@@ -236,10 +237,6 @@ class TriangulateHashRemote
 
         if (owner != rank_)
         {  
-          if (std::find(targets_.begin(), targets_.end(), owner) 
-              == targets_.end())
-            targets_.push_back(owner);
-          
           nedges += vcount[i].size();
           for (int p : vcount[i])
             send_count[p] += 1;
@@ -283,7 +280,12 @@ class TriangulateHashRemote
     }
 
     assert(nedges == std::accumulate(send_count, send_count + size_, 0));
-      
+    for (int p = 0; p < size_; p++)
+    {
+      if (send_count[p])
+        targets_.push_back(p);
+    }
+
     if (combufsize_ != -1)
     { 
       combufsize_ = (combufsize_ % 2 == 0) ? combufsize_ : combufsize_ + 1;
@@ -298,7 +300,7 @@ class TriangulateHashRemote
 
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
- 
+
     MPI_Barrier(comm_);
 
     double t1 = MPI_Wtime();
@@ -338,7 +340,7 @@ class TriangulateHashRemote
         scounts[p] = sebf_[p]->nbits();
         sdispl[p] = sdisp;
         sdisp += scounts[p];
-
+              
         rebf_[p] = new Bloomfilter(recv_count[targets_[p]]);
         rcounts[p] = rebf_[p]->nbits();
         rdispl[p] = rdisp;
@@ -357,12 +359,14 @@ class TriangulateHashRemote
     rbuf_ = new char[rdisp];
     std::memset(sbuf_, '0', sdisp);
     std::memset(rbuf_, '0', rdisp);
-
+    
     for (GraphElem p = 0; p < pdegree_; p++)
     {
       sebf_[p]->set(sbuf_ + sdispl[p]);
       rebf_[p]->set(rbuf_ + rdispl[p]);
     }
+
+    MPI_Barrier(comm_);
 
     // store edges in bloomfilter
     for (GraphElem i = 0; i < lnv; i++)
