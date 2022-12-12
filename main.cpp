@@ -38,6 +38,11 @@
 // ************************************************************************ 
 
 
+    /* CONT: This version was developed by Joseph Schuchart (UTK)
+     *       and currently requires the Open MPI branch mpi-continue-master 
+     *       from github.com/devreal/ompi.git, configured with
+     *       `--enable-mpi-ext=continue` to enable the continuations 
+     *       extension. */
 
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -69,7 +74,12 @@
 #error This version may hang due to a bug!!!
 #include "rmabufastric.hpp"
 #elif defined(AGGR_HEUR) // comm-avoiding heuristics
+#if defined(USE_MPI_CONTINUATION)
+#include "contric.hpp"  // based on hbufastric.hpp and uses MPI continuations
+#else
 #include "hbufastric.hpp"
+#endif
+#elif defined(USE_MPI_CONTINUATION)
 #elif defined(AGGR_HASH) // one-way hash-based edge query + buffered comm
 #include "hashfastric.hpp"
 #elif defined(AGGR_HASH2) // one-way hash-based edge query + buffered comm
