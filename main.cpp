@@ -79,7 +79,6 @@
 #else
 #include "hbufastric.hpp"
 #endif
-#elif defined(USE_MPI_CONTINUATION)
 #elif defined(AGGR_HASH) // one-way hash-based edge query + buffered comm
 #include "hashfastric.hpp"
 #elif defined(AGGR_HASH2) // one-way hash-based edge query + buffered comm
