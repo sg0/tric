@@ -75,7 +75,11 @@
 #include "rmabufastric.hpp"
 #elif defined(AGGR_HEUR) // comm-avoiding heuristics
 #if defined(USE_MPI_CONTINUATION)
+#if defined(PREPOST_RECVS)
+#include "contric2.hpp"  // based on hbufastric.hpp and uses MPI continuations plus
+#else                    // handles nb recvs in callback
 #include "contric.hpp"  // based on hbufastric.hpp and uses MPI continuations
+#endif
 #else
 #include "hbufastric.hpp"
 #endif
