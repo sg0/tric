@@ -13,7 +13,12 @@ distribution of a graph. The concept is quite simple, and the main idea is to co
 all combinations of consecutive edges and check whether they are triangles. For high-degree
 graphs, this design can result in significant memory increase.
 
-[?] Ghosh S, Halappanavar M. TriC: Distributed-memory Triangle Counting by Exploiting the 
+Papers:
+
+[1] Ghosh S. Improved Distributed-memory Triangle Counting by Exploiting the Graph Structure. 
+In 2022 IEEE High Performance Extreme Computing Conference (HPEC) 2022 Sep 19 (pp. 1-6). IEEE.
+
+[2] Ghosh S, Halappanavar M. TriC: Distributed-memory Triangle Counting by Exploiting the 
 Graph Structure. In 2020 IEEE High Performance Extreme Computing Conference (HPEC) 2020 
 Sep 22 (pp. 1-6). IEEE.
 
