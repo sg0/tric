@@ -65,6 +65,8 @@
 #include "bfastric.hpp"
 #elif defined(AGGR_BUFR) // aggregate buffered
 #include "bufastric.hpp"
+#elif defined(AGGR_BUFR_IRECV) // aggregate buffered using irecvs
+#include "ibufastric.hpp"
 #elif defined(AGGR_BUFR_RMA)
 #error This version may hang due to a bug!!!
 #include "rmabufastric.hpp"
@@ -182,11 +184,13 @@ int main(int argc, char *argv[])
   TriangulateAggrFatBatch tr(g);
 #elif defined(REMOTE_HASH)
   TriangulateHashRemote tr(g, bufferSize);
-#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
+#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_IRECV) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
 #if defined(AGGR_BUFR)
   TriangulateAggrBuffered tr(g, bufferSize);
+#elif defined(AGGR_BUFR_IRECV)
+  TriangulateAggrBufferedIrecv tr(g, bufferSize);
 #elif defined(AGGR_BUFR_RMA)
   TriangulateAggrBufferedRMA tr(g, bufferSize);
 #elif defined(AGGR_MAP)

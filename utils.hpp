@@ -93,7 +93,7 @@ const MPI_Datatype MPI_WEIGHT_TYPE = MPI_DOUBLE;
 
 extern unsigned seed;
 
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
+#if defined(AGGR_BUFR) || defined(AGGR_BUFR_IRECV) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
 #ifndef DEFAULT_BUF_SIZE
 #define DEFAULT_BUF_SIZE   (8000)
 #endif
