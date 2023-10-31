@@ -426,9 +426,7 @@ class TriangulateAggrBufferedIrecv
           if (count > 0)
           {
 #if defined(DOUBLE_RECV_BUFFER)
-          GraphElem *tmp = ibuf_;
-          ibuf_ = rbuf_;
-          rbuf_ = tmp;
+          std::swap(rbuf_, ibuf_);
 
           if (in_nghosts_ > 0)
           {
