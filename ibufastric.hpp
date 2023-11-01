@@ -399,7 +399,14 @@ class TriangulateAggrBufferedIrecv
         return true;
       return false;
     }
-     
+         
+    inline bool edge_above_min(GraphElem x, GraphElem y) const
+    {
+      if (y >= erange_[x*2])
+        return true;
+      return false;
+    }
+
     inline bool edge_within_max(GraphElem x, GraphElem y) const
     {
       if (y <= erange_[x*2+1])
@@ -427,13 +434,6 @@ class TriangulateAggrBufferedIrecv
           {
 #if defined(DOUBLE_RECV_BUFFER)
           std::swap(rbuf_, ibuf_);
-
-          if (in_nghosts_ > 0)
-          {
-            MPI_Irecv(ibuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
-                TAG_DATA, comm_, &data_rreq_);
-            recv_act_ = true;
-          }
 #endif
             for (GraphElem k = 0; k < count;)
             {
@@ -472,15 +472,18 @@ class TriangulateAggrBufferedIrecv
               prev = k;
             }
           }
-#if defined(DOUBLE_RECV_BUFFER)
-#else
+
           if (in_nghosts_ > 0)
           {
+#if defined(DOUBLE_RECV_BUFFER)
+            MPI_Irecv(ibuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
+                TAG_DATA, comm_, &data_rreq_);
+#else
             MPI_Irecv(rbuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
                 TAG_DATA, comm_, &data_rreq_);
+#endif
             recv_act_ = true;
           }
-#endif
         }
         else
           break;
