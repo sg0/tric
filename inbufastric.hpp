@@ -424,14 +424,15 @@ class TriangulateAggrBufferedInrecv
           {  
             GraphElem tup[2] = {-1,-1}, k = 0, prev = 0, disp = 0;
             int count = -1;
+            const int pidx = rinds[i];
 
-            MPI_Get_count(&rstats[rinds[i]], MPI_GRAPH_TYPE, &count);
+            MPI_Get_count(&rstats[pidx], MPI_GRAPH_TYPE, &count);
 
             if (count > 0)
             {
-              GraphElem *buf = &(rbuf_[rinds[i]*bufsize_]);
-              const int source = rstats[rinds[i]].MPI_SOURCE;
-              ract_[rinds[i]] = '0';
+              GraphElem *buf = &(rbuf_[pidx*bufsize_]);
+              const int source = rstats[pidx].MPI_SOURCE;
+              ract_[pidx] = '0';
 
               for (GraphElem k = 0; k < count;)
               {
@@ -476,10 +477,10 @@ class TriangulateAggrBufferedInrecv
       }
     }
 
-    inline bool recv_active() const
+    inline bool recv_active()
     {
         for (int const& p : targets_)
-          if (ract_[p] == '1')
+          if (ract_[pindex_[p]] == '1')
             return true;
         return false;
     }
