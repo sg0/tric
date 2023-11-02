@@ -425,13 +425,13 @@ class TriangulateAggrBufferedInrecv
             GraphElem tup[2] = {-1,-1}, k = 0, prev = 0, disp = 0;
             int count = -1;
 
-            ract_[rinds[i]] = '0';
             MPI_Get_count(&rstats[rinds[i]], MPI_GRAPH_TYPE, &count);
 
             if (count > 0)
             {
               GraphElem *buf = &(rbuf_[rinds[i]*bufsize_]);
-              recv_count_[rinds[i]] -= count;
+              const int source = rstats[rinds[i]].MPI_SOURCE;
+              ract_[rinds[i]] = '0';
 
               for (GraphElem k = 0; k < count;)
               {
@@ -464,14 +464,13 @@ class TriangulateAggrBufferedInrecv
 #endif
 
                   in_nghosts_ -= 1;
+                  recv_count_[source] -= 1;
                 }
 
                 k += (curr_count - prev);
                 prev = k;
               }
             }
-
-            post_recv(targets_[rinds[i]]);
           }
         }
       }
@@ -487,7 +486,7 @@ class TriangulateAggrBufferedInrecv
 
     inline void post_recv(GraphElem owner)
     {
-      if (recv_count_[owner] > 0)
+      if (recv_count_[owner] > 0 && ract_[pindex_[owner]] == '0')
       {
         MPI_Irecv(&rbuf_[pindex_[owner]*bufsize_], bufsize_, 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &rreq_[pindex_[owner]]);
@@ -528,6 +527,8 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
+        post_recv();
+
         if (out_nghosts_ == 0)
         {
           if (!sends_done)
