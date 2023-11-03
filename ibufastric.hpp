@@ -421,7 +421,7 @@ class TriangulateAggrBufferedIrecv
         int flag_rreq;
         MPI_Status status;
         int count = -1;
-        GraphElem tup[2] = {-1,-1}, k = 0, prev = 0, disp = 0;
+        GraphElem tup[2] = {-1,-1}, prev = 0, disp = 0;
 
         MPI_Test(&data_rreq_, &flag_rreq, &status);
 

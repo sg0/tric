@@ -255,6 +255,33 @@ class TriangulateAggrBufferedInrecv
         nbsend(p);
     }
 
+    inline bool pending_nbrecv() 
+    {
+      for (int const& p : targets_)
+        if (ract_[pindex_[p]] == '1')
+          return true;
+      return false;
+    }
+
+    inline void nbrecv(GraphElem owner)
+    {
+      if (recv_count_[owner] > 0 && ract_[pindex_[owner]] == '0')
+      {
+        MPI_Irecv(&rbuf_[pindex_[owner]*bufsize_], bufsize_, 
+            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &rreq_[pindex_[owner]]);
+        ract_[pindex_[owner]] = '1';
+      }
+    }
+
+    inline void nbrecv()
+    {
+      if (in_nghosts_ > 0)
+      {
+        for (int const& p : targets_)
+          nbrecv(p);
+      }
+    }
+
     inline void lookup_edges()
     {
       const GraphElem lnv = g_->get_lnv();
@@ -410,99 +437,138 @@ class TriangulateAggrBufferedInrecv
       return false;
     }
 
-    inline void process_messages(int *rinds, MPI_Status *rstats)
+    inline void process_messages()
     {     
-      int over = -1;
-
-      while(recv_active())
+      for(GraphElem p = 0; p < pdegree_; p++)
       {
-        MPI_Testsome(pdegree_, rreq_, &over, rinds, rstats);
+        MPI_Status rstat;
+        int flag;
 
-        if (over != MPI_UNDEFINED)
+        MPI_Request_get_status(rreq_[p], &flag, &rstat);
+
+        if (flag)
         {
-          for (int i = 0; i < over; i++)
-          {  
-            GraphElem tup[2] = {-1,-1}, k = 0, prev = 0, disp = 0;
-            int count = -1;
-            const int pidx = rinds[i];
+          GraphElem tup[2] = {-1,-1}, prev = 0, disp = 0;
+          int count = -1;
 
-            MPI_Get_count(&rstats[pidx], MPI_GRAPH_TYPE, &count);
+          ract_[p] = '0';
+          MPI_Wait(&rreq_[p], MPI_STATUS_IGNORE);
 
-            if (count > 0)
+          MPI_Get_count(&rstat, MPI_GRAPH_TYPE, &count);
+
+          const int source = rstat.MPI_SOURCE;
+
+          for (GraphElem k = 0; k < count;)
+          {
+            if (rbuf_[p*bufsize_+k] == -1)
             {
-              GraphElem *buf = &(rbuf_[pidx*bufsize_]);
-              const int source = rstats[pidx].MPI_SOURCE;
-              ract_[pidx] = '0';
+              k += 1;
+              prev = k;
+              continue;
+            }
 
-              for (GraphElem k = 0; k < count;)
+            tup[0] = rbuf_[p*bufsize_+k];
+            GraphElem curr_count = 0;
+
+            for (GraphElem m = k + 1; m < count; m++)
+            {
+              if (rbuf_[p*bufsize_+m] == -1)
               {
-                if (buf[k] == -1)
-                {
-                  k += 1;
-                  prev = k;
-                  continue;
-                }
+                curr_count = m + 1;
+                break;
+              }
 
-                tup[0] = buf[k];
-                GraphElem curr_count = 0;
-
-                for (GraphElem m = k + 1; m < count; m++)
-                {
-                  if (buf[m] == -1)
-                  {
-                    curr_count = m + 1;
-                    break;
-                  }
-
-                  tup[1] = buf[m];
+              tup[1] = rbuf_[p*bufsize_+m];
 
 #if defined(USE_OPENMP)
-                  if (check_edgelist_omp(tup))
-                    ntriangles_ += 1;
+              if (check_edgelist_omp(tup))
+                ntriangles_ += 1;
 #else
-                  if (check_edgelist(tup))
-                    ntriangles_ += 1;
+              if (check_edgelist(tup))
+                ntriangles_ += 1;
 #endif
 
-                  in_nghosts_ -= 1;
-                  recv_count_[source] -= 1;
-                }
-
-                k += (curr_count - prev);
-                prev = k;
-              }
+              in_nghosts_ -= 1;
+              recv_count_[source] -= 1;
             }
+
+            k += (curr_count - prev);
+            prev = k;
           }
         }
       }
     }
 
-    inline bool recv_active()
-    {
-        for (int const& p : targets_)
-          if (ract_[pindex_[p]] == '1')
-            return true;
-        return false;
-    }
 
-    inline void post_recv(GraphElem owner)
-    {
-      if (recv_count_[owner] > 0 && ract_[pindex_[owner]] == '0')
+#if 0
+    inline void process_messages(MPI_Status *rstats, int *inds)
+    {     
+      int over = -1;
+
+      while(pending_nbrecv())
       {
-        MPI_Irecv(&rbuf_[pindex_[owner]*bufsize_], bufsize_, 
-            MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &rreq_[pindex_[owner]]);
-        ract_[pindex_[owner]] = '1';
+        //MPI_Testsome(pdegree_, rreq_, &over, inds, rstats);
+        MPI_Request_get_status_some(pdegree_, rreq_, &over, inds, rstats);
+
+        if (over != MPI_UNDEFINED)
+        {
+          for (int i = 0; i < over; i++)
+          {  
+            GraphElem tup[2] = {-1,-1}, prev = 0, disp = 0;
+            int count = -1;
+
+            const int pidx = inds[i];
+            ract_[pidx] = '0';
+            MPI_Wait(&rreq_[pidx], MPI_STATUS_IGNORE);
+
+            MPI_Get_count(&rstats[pidx], MPI_GRAPH_TYPE, &count);
+
+            const int source = rstats[pidx].MPI_SOURCE;
+
+            for (GraphElem k = 0; k < count;)
+            {
+              if (rbuf_[pidx*bufsize_+k] == -1)
+              {
+                k += 1;
+                prev = k;
+                continue;
+              }
+
+              tup[0] = rbuf_[pidx*bufsize_+k];
+              GraphElem curr_count = 0;
+
+              for (GraphElem m = k + 1; m < count; m++)
+              {
+                if (rbuf_[pidx*bufsize_+m] == -1)
+                {
+                  curr_count = m + 1;
+                  break;
+                }
+
+                tup[1] = rbuf_[pidx*bufsize_+m];
+
+#if defined(USE_OPENMP)
+                if (check_edgelist_omp(tup))
+                  ntriangles_ += 1;
+#else
+                if (check_edgelist(tup))
+                  ntriangles_ += 1;
+#endif
+
+                in_nghosts_ -= 1;
+                recv_count_[source] -= 1;
+              }
+
+              k += (curr_count - prev);
+              prev = k;
+            }
+          }
+        }
+        else
+          break;
       }
     }
-
-    inline void post_recv()
-    {
-      if (in_nghosts_ > 0)
-      {
-        for (int const& p : targets_)
-          post_recv(p);
-      }
-    }
+#endif
 
     inline GraphElem count()
     {
@@ -515,12 +581,13 @@ class TriangulateAggrBufferedInrecv
 
       bool sends_done = false;
       int *inds = new int[pdegree_];
+#if 0
       int *rinds = new int[pdegree_];
       MPI_Status *rstats = new MPI_Status[pdegree_];
+#endif
       int over = -1;
      
-      // prepost recvs
-      post_recv();
+      nbrecv();
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
@@ -528,8 +595,11 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
-        post_recv();
-
+#if 0
+        process_messages(rstats, rinds);
+#endif        
+        process_messages();
+        
         if (out_nghosts_ == 0)
         {
           if (!sends_done)
@@ -540,9 +610,7 @@ class TriangulateAggrBufferedInrecv
         }
         else
           lookup_edges();
-
-        process_messages(rinds, rstats);
-        
+ 
         MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
 
         if (over != MPI_UNDEFINED)
@@ -578,7 +646,8 @@ class TriangulateAggrBufferedInrecv
 #endif
 #if defined(DEBUG_PRINTF)
         std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
-#endif            
+#endif  
+        nbrecv();
       }
 
       GraphElem ttc = 0, ltc = ntriangles_;
@@ -586,8 +655,10 @@ class TriangulateAggrBufferedInrecv
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
       delete []inds;
+#if 0
       delete []rinds;
       delete []rstats;
+#endif
 
       return (ttc/3);
     }
