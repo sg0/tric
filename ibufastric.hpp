@@ -66,9 +66,6 @@ class TriangulateAggrBufferedIrecv
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0), data_rreq_(MPI_REQUEST_NULL),
       recv_act_(false)
-#if defined(DOUBLE_RECV_BUFFER)
-      , ibuf_(nullptr)
-#endif
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -192,9 +189,6 @@ class TriangulateAggrBufferedIrecv
     
     // 2 is the buffer header size
     rbuf_     = new GraphElem[bufsize_];
-#if defined(DOUBLE_RECV_BUFFER)
-    ibuf_     = new GraphElem[bufsize_];
-#endif
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
@@ -228,9 +222,6 @@ class TriangulateAggrBufferedIrecv
     {
       delete []sbuf_;
       delete []rbuf_;
-#if defined(DOUBLE_RECV_BUFFER)
-      delete []ibuf_;
-#endif
       delete []sbuf_ctr_;
       delete []sreq_;
       delete []prev_k_;
@@ -431,9 +422,6 @@ class TriangulateAggrBufferedIrecv
 
           if (count > 0)
           {
-#if defined(DOUBLE_RECV_BUFFER)
-          std::swap(rbuf_, ibuf_);
-#endif
             for (GraphElem k = 0; k < count;)
             {
               if (rbuf_[k] == -1)
@@ -474,13 +462,8 @@ class TriangulateAggrBufferedIrecv
 
           if (in_nghosts_ > 0)
           {
-#if defined(DOUBLE_RECV_BUFFER)
-            MPI_Irecv(ibuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
-                TAG_DATA, comm_, &data_rreq_);
-#else
             MPI_Irecv(rbuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
                 TAG_DATA, comm_, &data_rreq_);
-#endif
             recv_act_ = true;
           }
         }
@@ -504,13 +487,8 @@ class TriangulateAggrBufferedIrecv
      
       if (in_nghosts_ > 0)
       {
-#if defined(DOUBLE_RECV_BUFFER)
-        MPI_Irecv(ibuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
-            TAG_DATA, comm_, &data_rreq_);
-#else
         MPI_Irecv(rbuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
             TAG_DATA, comm_, &data_rreq_);
-#endif
         recv_act_ = true;
       }
 
@@ -588,10 +566,6 @@ class TriangulateAggrBufferedIrecv
     MPI_Request *sreq_, data_rreq_;
     char *stat_;
     bool recv_act_;
-
-#if defined(DOUBLE_RECV_BUFFER)
-    GraphElem *ibuf_;
-#endif
     
     std::vector<int> targets_;
     int rank_, size_;

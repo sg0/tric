@@ -436,14 +436,14 @@ class TriangulateAggrBufferedInrecv
       return false;
     }
 
-    inline void process_messages()
-    {    
-      for(GraphElem p = 0; p < pdegree_; p++)
+    inline void process_recvs()
+    {   
+      for (GraphElem p = 0; p < pdegree_; p++)
       {
-        int flag, count = -1;
-        MPI_Status rstat;
         GraphElem tup[2] = {-1,-1}, prev = 0;
-        
+        MPI_Status rstat;
+        int flag, count;
+
         MPI_Request_get_status(rreq_[p], &flag, MPI_STATUS_IGNORE);
 
         if (flag)
@@ -498,76 +498,6 @@ class TriangulateAggrBufferedInrecv
       }
     }
 
-#if 0
-    inline void process_messages(MPI_Status *rstats, int *inds)
-    {     
-      int over = -1;
-
-      while(pending_nbrecv())
-      {
-        //MPI_Testsome(pdegree_, rreq_, &over, inds, rstats);
-        MPI_Request_get_status_some(pdegree_, rreq_, &over, inds, rstats);
-
-        if (over != MPI_UNDEFINED)
-        {
-          for (int i = 0; i < over; i++)
-          {  
-            GraphElem tup[2] = {-1,-1}, prev = 0, disp = 0;
-            int count = -1;
-
-            const int pidx = inds[i];
-            ract_[pidx] = '0';
-            MPI_Wait(&rreq_[pidx], MPI_STATUS_IGNORE);
-
-            MPI_Get_count(&rstats[pidx], MPI_GRAPH_TYPE, &count);
-
-            const int source = rstats[pidx].MPI_SOURCE;
-
-            for (GraphElem k = 0; k < count;)
-            {
-              if (rbuf_[pidx*bufsize_+k] == -1)
-              {
-                k += 1;
-                prev = k;
-                continue;
-              }
-
-              tup[0] = rbuf_[pidx*bufsize_+k];
-              GraphElem curr_count = 0;
-
-              for (GraphElem m = k + 1; m < count; m++)
-              {
-                if (rbuf_[pidx*bufsize_+m] == -1)
-                {
-                  curr_count = m + 1;
-                  break;
-                }
-
-                tup[1] = rbuf_[pidx*bufsize_+m];
-
-#if defined(USE_OPENMP)
-                if (check_edgelist_omp(tup))
-                  ntriangles_ += 1;
-#else
-                if (check_edgelist(tup))
-                  ntriangles_ += 1;
-#endif
-
-                in_nghosts_ -= 1;
-                recv_count_[source] -= 1;
-              }
-
-              k += (curr_count - prev);
-              prev = k;
-            }
-          }
-        }
-        else
-          break;
-      }
-    }
-#endif
-
     inline GraphElem count()
     {
 #if defined(USE_ALLREDUCE_FOR_EXIT)
@@ -589,7 +519,7 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
-        process_messages();
+        process_recvs();
         
         if (out_nghosts_ == 0)
         {
