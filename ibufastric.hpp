@@ -241,7 +241,6 @@ class TriangulateAggrBufferedIrecv
 
       pindex_.clear();
       targets_.clear();
-      mate_.clear();
     }
 
     void nbsend(GraphElem owner)
@@ -596,7 +595,7 @@ class TriangulateAggrBufferedIrecv
     
     std::vector<int> targets_;
     int rank_, size_;
-    std::unordered_map<int, int> pindex_, mate_; 
+    std::unordered_map<int, int> pindex_; 
     MPI_Comm comm_;
 };
 #endif
