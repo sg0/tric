@@ -438,17 +438,18 @@ class TriangulateAggrBufferedInrecv
 
     inline void process_messages()
     {    
-      int flag, count = -1;
-      MPI_Status rstat;
-
       for(GraphElem p = 0; p < pdegree_; p++)
       {
+        int flag, count = -1;
+        MPI_Status rstat;
         GraphElem tup[2] = {-1,-1}, prev = 0;
         
-        MPI_Request_get_status(rreq_[p], &flag, &rstat);
+        MPI_Request_get_status(rreq_[p], &flag, MPI_STATUS_IGNORE);
 
-        if (flag && rstat.MPI_SOURCE != MPI_PROC_NULL)
+        if (flag)
         {
+          MPI_Wait(&rreq_[p], &rstat);
+
           MPI_Get_count(&rstat, MPI_GRAPH_TYPE, &count);
 
           const int source = rstat.MPI_SOURCE;
@@ -491,7 +492,6 @@ class TriangulateAggrBufferedInrecv
             prev = k;
           }
 
-          MPI_Wait(&rreq_[p], MPI_STATUS_IGNORE);
           ract_[p] = '0';
           nbrecv(source);
         }
@@ -589,6 +589,8 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
+        process_messages();
+        
         if (out_nghosts_ == 0)
         {
           if (!sends_done)
@@ -635,10 +637,7 @@ class TriangulateAggrBufferedInrecv
 #endif
 #if defined(DEBUG_PRINTF)
         std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
-#endif 
-        
-        if (pending_nbrecv())
-          process_messages();
+#endif
       }
 
       GraphElem ttc = 0, ltc = ntriangles_;
