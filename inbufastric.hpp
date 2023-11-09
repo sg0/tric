@@ -523,6 +523,7 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
+        nbrecv();
         process_recvs();
         
         if (out_nghosts_ == 0)
