@@ -52,6 +52,9 @@
 #include <string>
 
 #include <mpi.h>
+#if defined(USE_OPENMP)
+#include <omp.h>
+#endif
 
 #if defined(NO_AGGR)    
 #include "tric.hpp"
@@ -106,7 +109,24 @@ int main(int argc, char *argv[])
 {
   double t0, t1, td, td0, td1;
 
+#if defined(DISABLE_THREAD_MULTIPLE_CHECK) || !defined(USE_OPENMP)
   MPI_Init(&argc, &argv);
+#else  
+  int max_threads;
+
+  max_threads = omp_get_max_threads();
+
+  if (max_threads > 1) {
+      int provided;
+      MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+      if (provided < MPI_THREAD_MULTIPLE) {
+          std::cerr << "MPI library does not support MPI_THREAD_MULTIPLE." << std::endl;
+          MPI_Abort(MPI_COMM_WORLD, -99);
+      }
+  } else {
+      MPI_Init(&argc, &argv);
+  }
+#endif
 
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
   MPI_Comm_rank(MPI_COMM_WORLD, &me);

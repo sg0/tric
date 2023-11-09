@@ -284,6 +284,7 @@ class TriangulateAggrBufferedInrecv
     inline void lookup_edges()
     {
       const GraphElem lnv = g_->get_lnv();
+
       for (GraphElem i = 0; i < lnv; i++)
       {
         if (vcount_[i] == 0) // all edges processed, move on
@@ -393,7 +394,7 @@ class TriangulateAggrBufferedInrecv
       return false;
     }
      
-#if defined(USE_OPENMP)
+#if defined(USE_OPENMP_NESTED)
     inline bool check_edgelist_omp(GraphElem tup[2])
     {
       GraphElem e0, e1;
@@ -437,7 +438,10 @@ class TriangulateAggrBufferedInrecv
     }
 
     inline void process_recvs()
-    {   
+    {  
+#if defined(USE_OPENMP)
+#pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_)
+#endif 
       for (GraphElem p = 0; p < pdegree_; p++)
       {
         GraphElem tup[2] = {-1,-1}, prev = 0;
@@ -476,7 +480,7 @@ class TriangulateAggrBufferedInrecv
 
               tup[1] = rbuf_[p*bufsize_+m];
 
-#if defined(USE_OPENMP)
+#if defined(USE_OPENMP_NESTED)
               if (check_edgelist_omp(tup))
                 ntriangles_ += 1;
 #else
