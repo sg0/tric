@@ -66,6 +66,9 @@ class TriangulateAggrBufferedInrecv
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0), rreq_(nullptr),
       ract_(nullptr), recv_count_(nullptr)
+#if defined(USE_OPENMP)
+      , dcomm_(nullptr), nthreads_(1), nblocks_(1)
+#endif
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -198,6 +201,20 @@ class TriangulateAggrBufferedInrecv
     sreq_     = new MPI_Request[pdegree_];
     rreq_     = new MPI_Request[pdegree_];
 
+#if defined(USE_OPENMP)
+#pragma omp parallel
+    {
+      nthreads_ = omp_get_num_threads();
+    }
+    if (pdegree_ > nthreads_)
+      nblocks_ = pdegree_ / nthreads_;
+    dcomm_   = new MPI_Comm[nthreads_];
+    std::fill(dcomm_, dcomm_ + nthreads_, MPI_COMM_NULL);
+
+    for (int i = 0; i < nthreads_; i++)
+      MPI_Comm_dup(comm_, &dcomm_[i]);
+#endif
+
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(rreq_, rreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
@@ -235,6 +252,12 @@ class TriangulateAggrBufferedInrecv
       delete []vcount_;
       delete []erange_;
 
+#if defined(USE_OPENMP)
+      for (int i = 0; i < nthreads_; i++)
+        MPI_Comm_free(&dcomm_[i]);
+      delete []dcomm_;
+#endif
+
       pindex_.clear();
       targets_.clear();
     }
@@ -243,15 +266,30 @@ class TriangulateAggrBufferedInrecv
     {
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
+#if defined(USE_OPENMP)
+        MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
+            MPI_GRAPH_TYPE, owner, TAG_DATA, dcomm_[std::min(pindex_[owner] / nblocks_, nthreads_ - 1)], &sreq_[pindex_[owner]]);
+#else
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
+#endif
       }
     }
 
     void nbsend()
     {
+#if defined(USE_OPENMP)
+#pragma omp parallel for default(shared)
+      for (GraphElem p = 0; p < pdegree_; p++)
+      {
+        if (sbuf_ctr_[p] > 0)
+          MPI_Isend(&sbuf_[p*bufsize_], sbuf_ctr_[p], MPI_GRAPH_TYPE, targets_[p], 
+              TAG_DATA, dcomm_[omp_get_thread_num()], &sreq_[p]);
+      }
+#else
       for (int const& p : targets_)
         nbsend(p);
+#endif
     }
 
     inline bool pending_nbrecv() 
@@ -266,8 +304,13 @@ class TriangulateAggrBufferedInrecv
     {
       if (recv_count_[owner] > 0 && ract_[pindex_[owner]] == '0')
       {
+#if defined(USE_OPENMP)
+        MPI_Irecv(&rbuf_[pindex_[owner]*bufsize_], bufsize_, 
+            MPI_GRAPH_TYPE, owner, TAG_DATA, dcomm_[omp_get_thread_num()], &rreq_[pindex_[owner]]);
+#else
         MPI_Irecv(&rbuf_[pindex_[owner]*bufsize_], bufsize_, 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &rreq_[pindex_[owner]]);
+#endif
         ract_[pindex_[owner]] = '1';
       }
     }
@@ -276,13 +319,19 @@ class TriangulateAggrBufferedInrecv
     {
       if (in_nghosts_ > 0)
       {
-        for (int const& p : targets_)
-          nbrecv(p);
+#if defined(USE_OPENMP)
+#pragma omp parallel for default(shared)
+#endif
+        for (GraphElem p = 0; p < pdegree_; p++)
+          nbrecv(targets_[p]);
       }
     }
 
     inline void lookup_edges()
     {
+      if (pdegree_ ==  0)
+        return;
+
       const GraphElem lnv = g_->get_lnv();
 
       for (GraphElem i = 0; i < lnv; i++)
@@ -596,5 +645,9 @@ class TriangulateAggrBufferedInrecv
     int rank_, size_;
     std::unordered_map<int, int> pindex_; 
     MPI_Comm comm_;
+#if defined(USE_OPENMP)
+    MPI_Comm *dcomm_;
+    int nthreads_, nblocks_;
+#endif
 };
 #endif

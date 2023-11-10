@@ -251,6 +251,9 @@ class TriangulateAggrBufferedIrecv
 
     inline void lookup_edges()
     {
+      if (pdegree_ ==  0)
+        return;
+
       const GraphElem lnv = g_->get_lnv();
       for (GraphElem i = 0; i < lnv; i++)
       {
