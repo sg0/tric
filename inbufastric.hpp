@@ -65,7 +65,7 @@ class TriangulateAggrBufferedInrecv
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0), rreq_(nullptr),
-      ract_(nullptr), recv_count_(nullptr)
+      ract_(nullptr), recv_count_(nullptr), sends_done_(0)
 #if defined(USE_OPENMP)
       , dcomm_(nullptr), nthreads_(1), nblocks_(1)
 #endif
@@ -279,25 +279,26 @@ class TriangulateAggrBufferedInrecv
     void nbsend()
     {
 #if defined(USE_OPENMP)
-#pragma omp parallel for default(shared)
+#pragma omp parallel for default(shared) reduction(+:sends_done_)
       for (GraphElem p = 0; p < pdegree_; p++)
       {
-        if (sbuf_ctr_[p] > 0)
+        if (stat_[p] == '0' && sbuf_ctr_[p] > 0)
+        {
           MPI_Isend(&sbuf_[p*bufsize_], sbuf_ctr_[p], MPI_GRAPH_TYPE, targets_[p], 
               TAG_DATA, dcomm_[omp_get_thread_num()], &sreq_[p]);
+          sends_done_++;
+        }
       }
 #else
       for (int const& p : targets_)
-        nbsend(p);
+      {
+        if (stat_[pindex_[p]] == '0')
+        {
+          nbsend(p);
+          sends_done_++;
+        }
+      }
 #endif
-    }
-
-    inline bool pending_nbrecv() 
-    {
-      for (int const& p : targets_)
-        if (ract_[pindex_[p]] == '1')
-          return true;
-      return false;
     }
 
     inline void nbrecv(GraphElem owner)
@@ -493,16 +494,14 @@ class TriangulateAggrBufferedInrecv
 #endif 
       for (GraphElem p = 0; p < pdegree_; p++)
       {
-        GraphElem tup[2] = {-1,-1}, prev = 0;
         MPI_Status rstat;
+        GraphElem tup[2] = {-1,-1}, prev = 0;
         int flag, count;
 
-        MPI_Request_get_status(rreq_[p], &flag, MPI_STATUS_IGNORE);
+        MPI_Test(&rreq_[p], &flag, &rstat);
 
-        if (flag)
+        if (flag && rstat.MPI_SOURCE != MPI_ANY_SOURCE)
         {
-          MPI_Wait(&rreq_[p], &rstat);
-
           MPI_Get_count(&rstat, MPI_GRAPH_TYPE, &count);
 
           const int source = rstat.MPI_SOURCE;
@@ -546,7 +545,6 @@ class TriangulateAggrBufferedInrecv
           }
 
           ract_[p] = '0';
-          nbrecv(source);
         }
       }
     }
@@ -560,8 +558,8 @@ class TriangulateAggrBufferedInrecv
       MPI_Request nbar_req = MPI_REQUEST_NULL;
 #endif
 
-      bool sends_done = false;
-      int *inds = new int[pdegree_];
+      int* inds = new int[pdegree_];
+      MPI_Status* rstat = new MPI_Status[pdegree_];
       int over = -1;
      
       nbrecv();
@@ -572,20 +570,17 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
-        nbrecv();
         process_recvs();
+        nbrecv();
         
         if (out_nghosts_ == 0)
         {
-          if (!sends_done)
-          {
+          if (sends_done_ < pdegree_)
             nbsend();
-            sends_done = true;
-          }
         }
         else
           lookup_edges();
- 
+        
         MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
 
         if (over != MPI_UNDEFINED)
@@ -629,6 +624,7 @@ class TriangulateAggrBufferedInrecv
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
       delete []inds;
+      delete []rstat;
 
       return (ttc/3);
     }
@@ -642,7 +638,7 @@ class TriangulateAggrBufferedInrecv
     char *stat_, *ract_;
     
     std::vector<int> targets_;
-    int rank_, size_;
+    int rank_, size_, sends_done_;
     std::unordered_map<int, int> pindex_; 
     MPI_Comm comm_;
 #if defined(USE_OPENMP)

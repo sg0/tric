@@ -65,7 +65,7 @@ class TriangulateAggrBufferedIrecv
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0), data_rreq_(MPI_REQUEST_NULL),
-      recv_act_(false)
+      recv_act_(false), sends_done_(0)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -246,7 +246,13 @@ class TriangulateAggrBufferedIrecv
     void nbsend()
     {
       for (int const& p : targets_)
-        nbsend(p);
+      {
+        if (stat_[pindex_[p]] == '0')
+        {
+          nbsend(p);
+          sends_done_++;
+        }
+      }
     }
 
     inline void lookup_edges()
@@ -418,49 +424,46 @@ class TriangulateAggrBufferedIrecv
 
         MPI_Test(&data_rreq_, &flag_rreq, &status);
 
-        if (flag_rreq)
+        if (flag_rreq && status.MPI_SOURCE != MPI_ANY_SOURCE)
         {  
           recv_act_ = false;
           MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
 
-          if (count > 0)
+          for (GraphElem k = 0; k < count;)
           {
-            for (GraphElem k = 0; k < count;)
+            if (rbuf_[k] == -1)
             {
-              if (rbuf_[k] == -1)
+              k += 1;
+              prev = k;
+              continue;
+            }
+
+            tup[0] = rbuf_[k];
+            GraphElem curr_count = 0;
+
+            for (GraphElem m = k + 1; m < count; m++)
+            {
+              if (rbuf_[m] == -1)
               {
-                k += 1;
-                prev = k;
-                continue;
+                curr_count = m + 1;
+                break;
               }
 
-              tup[0] = rbuf_[k];
-              GraphElem curr_count = 0;
-
-              for (GraphElem m = k + 1; m < count; m++)
-              {
-                if (rbuf_[m] == -1)
-                {
-                  curr_count = m + 1;
-                  break;
-                }
-
-                tup[1] = rbuf_[m];
+              tup[1] = rbuf_[m];
 
 #if defined(USE_OPENMP)
-                if (check_edgelist_omp(tup))
-                  ntriangles_ += 1;
+              if (check_edgelist_omp(tup))
+                ntriangles_ += 1;
 #else
-                if (check_edgelist(tup))
-                  ntriangles_ += 1;
+              if (check_edgelist(tup))
+                ntriangles_ += 1;
 #endif
 
-                in_nghosts_ -= 1;
-              }
-
-              k += (curr_count - prev);
-              prev = k;
+              in_nghosts_ -= 1;
             }
+
+            k += (curr_count - prev);
+            prev = k;
           }
 
           if (in_nghosts_ > 0)
@@ -484,7 +487,6 @@ class TriangulateAggrBufferedIrecv
       MPI_Request nbar_req = MPI_REQUEST_NULL;
 #endif
 
-      bool sends_done = false;
       int *inds = new int[pdegree_];
       int over = -1;
      
@@ -503,11 +505,8 @@ class TriangulateAggrBufferedIrecv
       {
         if (out_nghosts_ == 0)
         {
-          if (!sends_done)
-          {
+          if (sends_done_ < pdegree_)
             nbsend();
-            sends_done = true;
-          }
         }
         else
           lookup_edges();
@@ -571,7 +570,7 @@ class TriangulateAggrBufferedIrecv
     bool recv_act_;
     
     std::vector<int> targets_;
-    int rank_, size_;
+    int rank_, size_, sends_done_;
     std::unordered_map<int, int> pindex_; 
     MPI_Comm comm_;
 };
