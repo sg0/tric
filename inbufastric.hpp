@@ -280,25 +280,21 @@ class TriangulateAggrBufferedInrecv
     {
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared) reduction(+:sends_done_)
+#endif
       for (GraphElem p = 0; p < pdegree_; p++)
       {
         if (stat_[p] == '0' && sbuf_ctr_[p] > 0)
         {
+#if defined(USE_OPENMP)
           MPI_Isend(&sbuf_[p*bufsize_], sbuf_ctr_[p], MPI_GRAPH_TYPE, targets_[p], 
               TAG_DATA, dcomm_[omp_get_thread_num()], &sreq_[p]);
-          sends_done_++;
-        }
-      }
 #else
-      for (int const& p : targets_)
-      {
-        if (stat_[pindex_[p]] == '0')
-        {
-          nbsend(p);
+          MPI_Isend(&sbuf_[p*bufsize_], sbuf_ctr_[p], MPI_GRAPH_TYPE, targets_[p], 
+              TAG_DATA, comm_, &sreq_[p]);
+#endif
           sends_done_++;
         }
       }
-#endif
     }
 
     inline void nbrecv(GraphElem owner)
@@ -499,12 +495,12 @@ class TriangulateAggrBufferedInrecv
         int flag, count;
 
         MPI_Test(&rreq_[p], &flag, &rstat);
+          
+        const int source = rstat.MPI_SOURCE;
 
-        if (flag && rstat.MPI_SOURCE != MPI_ANY_SOURCE)
+        if (flag && source != MPI_ANY_SOURCE)
         {
           MPI_Get_count(&rstat, MPI_GRAPH_TYPE, &count);
-
-          const int source = rstat.MPI_SOURCE;
 
           for (GraphElem k = 0; k < count;)
           {
@@ -559,7 +555,6 @@ class TriangulateAggrBufferedInrecv
 #endif
 
       int* inds = new int[pdegree_];
-      MPI_Status* rstat = new MPI_Status[pdegree_];
       int over = -1;
      
       nbrecv();
@@ -624,7 +619,6 @@ class TriangulateAggrBufferedInrecv
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
       delete []inds;
-      delete []rstat;
 
       return (ttc/3);
     }
