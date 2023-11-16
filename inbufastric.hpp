@@ -484,7 +484,10 @@ class TriangulateAggrBufferedInrecv
     }
 
     inline void process_recvs()
-    {  
+    { 
+      if (in_nghosts_ == 0 || pdegree_ == 0)
+        return;
+
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_)
 #endif 
@@ -541,6 +544,7 @@ class TriangulateAggrBufferedInrecv
           }
 
           ract_[p] = '0';
+          nbrecv(source);
         }
       }
     }
@@ -566,7 +570,6 @@ class TriangulateAggrBufferedInrecv
 #endif
       {
         process_recvs();
-        nbrecv();
         
         if (out_nghosts_ == 0)
         {
