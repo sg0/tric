@@ -264,7 +264,7 @@ class TriangulateAggrBufferedInrecv
 
     void nbsend(GraphElem owner)
     {
-      if (sbuf_ctr_[pindex_[owner]] > 0)
+      if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
 #if defined(USE_OPENMP)
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
@@ -273,6 +273,7 @@ class TriangulateAggrBufferedInrecv
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
 #endif
+        stat_[pindex_[owner]] = '1'; 
       }
     }
 
@@ -360,7 +361,6 @@ class TriangulateAggrBufferedInrecv
               {
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
-                stat_[pidx] = '1'; // messages in-flight
 
                 nbsend(owner);
 
@@ -384,7 +384,6 @@ class TriangulateAggrBufferedInrecv
 
                   sbuf_[disp+sbuf_ctr_[pidx]] = -1; // demarcate vertex boundary
                   sbuf_ctr_[pidx] += 1;
-                  stat_[pidx] = '1'; 
 
                   nbsend(owner);
 
@@ -408,7 +407,6 @@ class TriangulateAggrBufferedInrecv
                 {
                   sbuf_[disp+sbuf_ctr_[pidx]] = -1; 
                   sbuf_ctr_[pidx] += 1;
-                  stat_[pidx] = '1';
 
                   nbsend(owner);
                 }
@@ -483,27 +481,28 @@ class TriangulateAggrBufferedInrecv
       return false;
     }
 
-    inline void process_recvs()
+    inline void process_recvs(int *inds, MPI_Status* rstat)
     { 
       if (in_nghosts_ == 0 || pdegree_ == 0)
         return;
 
-#if defined(USE_OPENMP)
-#pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_)
-#endif 
-      for (GraphElem p = 0; p < pdegree_; p++)
+      int over = -1;
+
+      MPI_Testsome(pdegree_, rreq_, &over, inds, rstat);
+
+      if (over != MPI_UNDEFINED)
       {
-        MPI_Status rstat;
-        GraphElem tup[2] = {-1,-1}, prev = 0;
-        int flag, count;
-
-        MPI_Test(&rreq_[p], &flag, &rstat);
-          
-        const int source = rstat.MPI_SOURCE;
-
-        if (flag && source != MPI_ANY_SOURCE)
+#if defined(USE_OPENMP)
+#pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_) if (over >= 16)
+#endif 
+        for (GraphElem i = 0; i < over; i++)
         {
-          MPI_Get_count(&rstat, MPI_GRAPH_TYPE, &count);
+          GraphElem p = inds[i], tup[2] = {-1,-1}, prev = 0;
+          int count;
+
+          const int source = rstat[p].MPI_SOURCE;
+
+          MPI_Get_count(&rstat[p], MPI_GRAPH_TYPE, &count);
 
           for (GraphElem k = 0; k < count;)
           {
@@ -542,7 +541,6 @@ class TriangulateAggrBufferedInrecv
             k += (curr_count - prev);
             prev = k;
           }
-
           ract_[p] = '0';
           nbrecv(source);
         }
@@ -558,6 +556,7 @@ class TriangulateAggrBufferedInrecv
       MPI_Request nbar_req = MPI_REQUEST_NULL;
 #endif
 
+      MPI_Status* rstat = new MPI_Status[pdegree_];
       int* inds = new int[pdegree_];
       int over = -1;
      
@@ -569,8 +568,8 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
-        process_recvs();
-        
+        process_recvs(inds, rstat);
+
         if (out_nghosts_ == 0)
         {
           if (sends_done_ < pdegree_)
@@ -611,6 +610,7 @@ class TriangulateAggrBufferedInrecv
             nbar_active = true;
           }
         }
+
 #endif
 #if defined(DEBUG_PRINTF)
         std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
