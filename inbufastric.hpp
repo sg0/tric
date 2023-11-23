@@ -293,6 +293,7 @@ class TriangulateAggrBufferedInrecv
           MPI_Isend(&sbuf_[p*bufsize_], sbuf_ctr_[p], MPI_GRAPH_TYPE, targets_[p], 
               TAG_DATA, comm_, &sreq_[p]);
 #endif
+          stat_[p] = '1'; 
           sends_done_++;
         }
       }
@@ -300,7 +301,7 @@ class TriangulateAggrBufferedInrecv
 
     inline void nbrecv(GraphElem owner)
     {
-      if (recv_count_[owner] > 0 && ract_[pindex_[owner]] == '0')
+      if (ract_[pindex_[owner]] == '0' && recv_count_[owner] > 0)
       {
 #if defined(USE_OPENMP)
         MPI_Irecv(&rbuf_[pindex_[owner]*bufsize_], bufsize_, 
@@ -481,28 +482,28 @@ class TriangulateAggrBufferedInrecv
       return false;
     }
 
-    inline void process_recvs(int *inds, MPI_Status* rstat)
+    inline void process_recvs()
     { 
       if (in_nghosts_ == 0 || pdegree_ == 0)
         return;
 
-      int over = -1;
-
-      MPI_Testsome(pdegree_, rreq_, &over, inds, rstat);
-
-      if (over != MPI_UNDEFINED)
-      {
 #if defined(USE_OPENMP)
 #pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_) if (over >= 16)
 #endif 
-        for (GraphElem i = 0; i < over; i++)
+      for (GraphElem p = 0; p < pdegree_; p++)
+      {
+        GraphElem tup[2] = {-1,-1}, prev = 0;
+        int count;
+        MPI_Status rstat;
+        int flag = -1;
+
+        MPI_Test(&rreq_[p], &flag, &rstat);
+
+        if (flag)
         {
-          GraphElem p = inds[i], tup[2] = {-1,-1}, prev = 0;
-          int count;
+          const int source = rstat.MPI_SOURCE;
 
-          const int source = rstat[p].MPI_SOURCE;
-
-          MPI_Get_count(&rstat[p], MPI_GRAPH_TYPE, &count);
+          MPI_Get_count(&rstat, MPI_GRAPH_TYPE, &count);
 
           for (GraphElem k = 0; k < count;)
           {
@@ -541,6 +542,7 @@ class TriangulateAggrBufferedInrecv
             k += (curr_count - prev);
             prev = k;
           }
+
           ract_[p] = '0';
           nbrecv(source);
         }
@@ -556,10 +558,9 @@ class TriangulateAggrBufferedInrecv
       MPI_Request nbar_req = MPI_REQUEST_NULL;
 #endif
 
-      MPI_Status* rstat = new MPI_Status[pdegree_];
-      int* inds = new int[pdegree_];
+      int* inds = new int[pdegree_]();
       int over = -1;
-     
+         
       nbrecv();
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
@@ -568,7 +569,7 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
-        process_recvs(inds, rstat);
+        process_recvs();
 
         if (out_nghosts_ == 0)
         {
