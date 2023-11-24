@@ -250,7 +250,9 @@ class TriangulateAggrBufferedIrecv
         if (stat_[pindex_[p]] == '0')
         {
           nbsend(p);
+          
           sends_done_++;
+          stat_[pindex_[p]] = '1';
         }
       }
     }
