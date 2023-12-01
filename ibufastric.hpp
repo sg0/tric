@@ -65,7 +65,7 @@ class TriangulateAggrBufferedIrecv
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0), data_rreq_(MPI_REQUEST_NULL),
-      recv_act_(false), sends_done_(0)
+      recv_act_(false)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -247,12 +247,12 @@ class TriangulateAggrBufferedIrecv
     {
       for (int const& p : targets_)
       {
-        if (stat_[pindex_[p]] == '0')
+        if (sbuf_ctr_[pindex_[p]] > 0)
         {
-          nbsend(p);
-          
-          sends_done_++;
-          stat_[pindex_[p]] = '1';
+          MPI_Isend(&sbuf_[pindex_[p]*bufsize_], sbuf_ctr_[pindex_[p]], 
+              MPI_GRAPH_TYPE, p, TAG_DATA, comm_, &sreq_[pindex_[p]]);
+
+          stat_[pindex_[p]] == '1';
         }
       }
     }
@@ -491,6 +491,7 @@ class TriangulateAggrBufferedIrecv
 
       int *inds = new int[pdegree_];
       int over = -1;
+      bool sends_done = false;
      
       if (in_nghosts_ > 0)
       {
@@ -507,8 +508,11 @@ class TriangulateAggrBufferedIrecv
       {
         if (out_nghosts_ == 0)
         {
-          if (sends_done_ < pdegree_)
+          if (!sends_done)
+          {
             nbsend();
+            sends_done = true;
+          }
         }
         else
           lookup_edges();
@@ -530,7 +534,7 @@ class TriangulateAggrBufferedIrecv
 #if defined(USE_ALLREDUCE_FOR_EXIT)
         count = in_nghosts_;
         MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
-        if (count == 0)
+        if (count == 0 && sends_done)
           break;
 #else       
         if (nbar_active)
@@ -541,7 +545,7 @@ class TriangulateAggrBufferedIrecv
         }
         else
         {
-          if (in_nghosts_ == 0)
+          if (in_nghosts_ == 0 && sends_done) 
           {
             MPI_Ibarrier(comm_, &nbar_req);
             nbar_active = true;
@@ -572,7 +576,7 @@ class TriangulateAggrBufferedIrecv
     bool recv_act_;
     
     std::vector<int> targets_;
-    int rank_, size_, sends_done_;
+    int rank_, size_;
     std::unordered_map<int, int> pindex_; 
     MPI_Comm comm_;
 };
