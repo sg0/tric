@@ -195,17 +195,17 @@ class TriangulateAggrBufferedInrecv
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
  
-    // 2 is the buffer header size
-    rbuf_     = new GraphElem[rdegree_*bufsize_];
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sbuf_ctr_ = new GraphElem[pdegree_]();
     prev_k_   = new GraphElem[pdegree_];
     prev_m_   = new GraphElem[pdegree_];
-    stat_     = new char[pdegree_];
-    ract_     = new char[rdegree_];
     sreq_     = new MPI_Request[pdegree_];
+    stat_     = new char[pdegree_];
+    
+    rbuf_     = new GraphElem[rdegree_*bufsize_];
     rreq_     = new MPI_Request[rdegree_];
     rstat_    = new MPI_Status[rdegree_];
+    ract_     = new char[rdegree_];
 
 #if defined(USE_OPENMP)
 #pragma omp parallel
@@ -222,10 +222,11 @@ class TriangulateAggrBufferedInrecv
 #endif
 
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
-    std::fill(rreq_, rreq_ + rdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
+    
+    std::fill(rreq_, rreq_ + rdegree_, MPI_REQUEST_NULL);
     std::fill(ract_, ract_ + rdegree_, '0');
 
     MPI_Barrier(comm_);
@@ -267,6 +268,8 @@ class TriangulateAggrBufferedInrecv
 
       pindex_.clear();
       targets_.clear();
+      rindex_.clear();
+      sources_.clear();
     }
 
     void nbsend(GraphElem owner)
