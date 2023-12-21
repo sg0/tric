@@ -66,6 +66,9 @@ class TriangulateAggrBufferedInrecv
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
       ract_(nullptr), recv_count_(nullptr), rindex_(0), rdegree_(0)
+#if defined(RECV_MAP)
+      , rmap_({})
+#endif
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -240,6 +243,10 @@ class TriangulateAggrBufferedInrecv
       delete []vcount_;
       delete []erange_;
 
+#if defined(RECV_MAP)
+      rmap_.clear();
+#endif
+
       pindex_.clear();
       targets_.clear();
       rindex_.clear();
@@ -258,7 +265,7 @@ class TriangulateAggrBufferedInrecv
 
     void nbsend()
     {
-#if defined(USE_OPENMP)
+#if defined(USE_OPENMP) && !defined(RECV_MAP)
 #pragma omp parallel for default(shared)
 #endif
       for (GraphElem p = 0; p < pdegree_; p++)
@@ -267,7 +274,7 @@ class TriangulateAggrBufferedInrecv
 
     inline void nbrecv()
     {
-#if defined(USE_OPENMP)
+#if defined(USE_OPENMP) && !defined(RECV_MAP) 
 #pragma omp parallel for default(shared)
 #endif
       for (int p = 0; p < rdegree_; p++)
@@ -376,7 +383,7 @@ class TriangulateAggrBufferedInrecv
       }
     }
 
-    inline bool check_edgelist(GraphElem tup[2])
+    inline bool check_edgelist(GraphElem (&tup)[2])
     {
       GraphElem e0, e1;
       const GraphElem lv = g_->global_to_local(tup[0]);
@@ -393,7 +400,7 @@ class TriangulateAggrBufferedInrecv
     }
      
 #if defined(USE_OPENMP_NESTED)
-    inline bool check_edgelist_omp(GraphElem tup[2])
+    inline bool check_edgelist_omp(GraphElem (&tup)[2])
     {
       GraphElem e0, e1;
       bool found = false;
@@ -434,13 +441,43 @@ class TriangulateAggrBufferedInrecv
         return true;
       return false;
     }
-    
+   
+#if defined(RECV_MAP)
+    bool find_pair(GraphElem (&pair)[2])
+    {
+      if (rmap_.count(pair[0]))
+      {
+        typedef std::multimap<const GraphElem, GraphElem>::const_iterator mmap_t;
+        std::pair<mmap_t, mmap_t> range = rmap_.equal_range(pair[0]);
+        
+        for (mmap_t it = range.first; it != range.second; ++it)
+          if (it->second == pair[1])
+            return true;
+      }
+      return false;
+    }
+
+    void check_rmap(GraphElem (&pair)[2])
+    {
+      if (find_pair(pair)) 
+        ntriangles_ += 1;
+      else
+      {
+        if (check_edgelist(pair))
+        {
+          ntriangles_ += 1;
+          rmap_.insert(std::pair<const GraphElem, GraphElem>{pair[0], pair[1]});
+        }
+      }
+    }
+#endif
+
     inline void process_recvs()
     {
       if (in_nghosts_ == 0)
         return;
 
-#if defined(USE_OPENMP)
+#if defined(USE_OPENMP) && !defined(RECV_MAP)
 #pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_)
 #endif
       for (int p = 0; p < rdegree_; p++)
@@ -485,6 +522,9 @@ class TriangulateAggrBufferedInrecv
 
                 tup[1] = rbuf_[p*bufsize_+m];
 
+#if defined(RECV_MAP)
+                check_rmap(tup);
+#else
 #if defined(USE_OPENMP_NESTED)
                 if (check_edgelist_omp(tup))
                   ntriangles_ += 1;
@@ -492,7 +532,7 @@ class TriangulateAggrBufferedInrecv
                 if (check_edgelist(tup))
                   ntriangles_ += 1;
 #endif
-
+#endif
                 in_nghosts_ -= 1;
                 recv_count_[source] -= 1;
               }
@@ -596,6 +636,9 @@ class TriangulateAggrBufferedInrecv
     std::vector<int> targets_, sources_;
     int rank_, size_;
     std::unordered_map<int, int> pindex_, rindex_; 
+#if defined(RECV_MAP)
+    std::multimap<const GraphElem, GraphElem> rmap_;
+#endif
     MPI_Comm comm_;
 };
 #endif
