@@ -72,6 +72,8 @@
 #include "ibufastric.hpp"
 #elif defined(AGGR_BUFR_INRECV) // aggregate buffered using multiple irecvs
 #include "inbufastric.hpp"
+#elif defined(BFS_NOCOMM) // BFS-based zero extra communication 
+#include "bfstric.hpp"
 #elif defined(AGGR_BUFR_RMA)
 #error This version may hang due to a bug!!!
 #include "rmabufastric.hpp"
@@ -206,6 +208,8 @@ int main(int argc, char *argv[])
   TriangulateAggrFatBatch tr(g);
 #elif defined(REMOTE_HASH)
   TriangulateHashRemote tr(g, bufferSize);
+#elif defined(BFS_NOCOMM)
+  TriangulateBFS tr(g);
 #elif defined(AGGR_BUFR) || defined(AGGR_BUFR_INRECV) || defined(AGGR_BUFR_IRECV) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
