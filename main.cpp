@@ -72,8 +72,6 @@
 #include "ibufastric.hpp"
 #elif defined(AGGR_BUFR_INRECV) // aggregate buffered using multiple irecvs
 #include "inbufastric.hpp"
-#elif defined(BFS_NOCOMM) // BFS-based zero extra communication 
-#include "bfstric.hpp"
 #elif defined(AGGR_BUFR_RMA)
 #error This version may hang due to a bug!!!
 #include "rmabufastric.hpp"
