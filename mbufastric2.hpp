@@ -497,10 +497,9 @@ class TriangulateMapNcol
 
     inline GraphElem count()
     {
-      lookup_edges();
-
       if (size_ > 1)
       {
+        lookup_edges();
         flatten_nalltoallv();
         process_incoming();
       }
