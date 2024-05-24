@@ -87,7 +87,9 @@
 #include "chashfastric.hpp"
 #elif defined(AGGR_MAP) // aggregate buffered + heuristics using map
 #include "mbufastric.hpp"
-#else // aggregate compressed - high memory overhead
+#elif defined(MAP_NCOLL) // heuristics using map and multiple irecvs
+#include "mbufastric2.hpp"
+#else // compressed - high memory overhead
 #include "cfastric.hpp"
 #endif
 
@@ -205,9 +207,9 @@ int main(int argc, char *argv[])
 #elif defined(COLL_BATCH)
   TriangulateAggrFatBatch tr(g);
 #elif defined(REMOTE_HASH)
-  TriangulateHashRemote tr(g, bufferSize);
-#elif defined(BFS_NOCOMM)
-  TriangulateBFS tr(g);
+  TriangulateHashRemote tr(g);
+#elif defined(MAP_NCOLL)
+  TriangulateMapNcol tr(g);
 #elif defined(AGGR_BUFR) || defined(AGGR_BUFR_INRECV) || defined(AGGR_BUFR_IRECV) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;

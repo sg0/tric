@@ -427,7 +427,7 @@ class TriangulateAggrBufferedInrecv
     }
 #endif
 
-    inline bool edge_between_range(GraphElem x, GraphElem y) const
+    inline bool edge_between_range(GraphElem const& x, GraphElem const& y) const
     {
       if ((y >= erange_[x*2]) && (y <= erange_[x*2+1]))
         return true;
