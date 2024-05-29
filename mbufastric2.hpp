@@ -190,35 +190,39 @@ class TriangulateMapNcol
     MPI_Comm_rank(comm_, &rank_);
 
     const GraphElem lnv = g_->get_lnv();
-    const GraphElem nv = g_->get_nv();
-
-    erange_ = new GraphElem[nv*2]();
     GraphElem *send_count  = new GraphElem[size_]();
     GraphElem *recv_count  = new GraphElem[size_]();
 
     double t0 = MPI_Wtime();
-
-    // store edge ranges
-    GraphElem base = g_->get_base(rank_);
-    for (GraphElem i = 0; i < lnv; i++)
+    
+    if (size_ > 1)
     {
-      GraphElem e0, e1;
-      g_->edge_range(i, e0, e1);
+      const GraphElem nv = g_->get_nv();
 
-      if ((e0 + 1) == e1)
-        continue;
+      erange_ = new GraphElem[nv*2];
 
-      Edge const& edge_s = g_->get_edge(e0);
-      Edge const& edge_t = g_->get_edge(e1-1);
+      // store edge ranges
+      GraphElem base = g_->get_base(rank_);
+      for (GraphElem i = 0; i < lnv; i++)
+      {
+        GraphElem e0, e1;
+        g_->edge_range(i, e0, e1);
 
-      erange_[(i + base)*2] = edge_s.tail_;
-      erange_[(i + base)*2+1] = edge_t.tail_;
+        if ((e0 + 1) == e1)
+          continue;
+
+        Edge const& edge_s = g_->get_edge(e0);
+        Edge const& edge_t = g_->get_edge(e1-1);
+
+        erange_[(i + base)*2] = edge_s.tail_;
+        erange_[(i + base)*2+1] = edge_t.tail_;
+      }
+
+      MPI_Barrier(comm_);
+
+      MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
+          MPI_SUM, comm_);
     }
-    
-    MPI_Barrier(comm_);
-    
-    MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
-        MPI_SUM, comm_);
 
 #if defined(USE_OPENMP)
 #pragma omp declare reduction(merge : std::vector<int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
@@ -286,45 +290,49 @@ class TriangulateMapNcol
       std::cout << "Average time for local counting during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
-        
-    // outgoing/incoming data and buffer size
-    MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
-    
-    for (GraphElem p = 0; p < size_; p++)
-    {
-      if (send_count[p] > 0)
-        targets_.push_back(p);
+     
+    if (size_ > 1)
+    {       
+      // outgoing/incoming data and buffer size
+      MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
 
-      if (recv_count[p] > 0)
-        sources_.push_back(p);
+
+      for (GraphElem p = 0; p < size_; p++)
+      {
+        if (send_count[p] > 0)
+          targets_.push_back(p);
+
+        if (recv_count[p] > 0)
+          sources_.push_back(p);
+      }
+
+      pdegree_ = targets_.size(); 
+      rdegree_ = sources_.size();
+
+      for (int i = 0; i < pdegree_; i++)
+        pindex_.insert({targets_[i], i});
+
+      for (int i = 0; i < rdegree_; i++)
+        rindex_.insert({sources_[i], i});
+
+      edge_map_.resize(pdegree_);
+      scounts_.resize(pdegree_);
+      sdispls_.resize(pdegree_);
+      rcounts_.resize(rdegree_);
+      rdispls_.resize(rdegree_);
+
+      MPI_Dist_graph_create_adjacent(comm_, sources_.size(), (int*)sources_.data(), 
+          MPI_UNWEIGHTED, targets_.size(), (int*)targets_.data(), MPI_UNWEIGHTED, 
+          MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
+
+      // indegree/outdegree checking...
+      int weighted, indegree, outdegree;
+      MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
+
+      // to get sources/targets, use MPI_Dist_graph_neighbors
+      assert(indegree == rdegree_);
+      assert(outdegree == pdegree_);
     }
- 
-    pdegree_ = targets_.size(); 
-    rdegree_ = sources_.size();
-
-    for (int i = 0; i < pdegree_; i++)
-      pindex_.insert({targets_[i], i});
-
-    for (int i = 0; i < rdegree_; i++)
-      rindex_.insert({sources_[i], i});
-
-    edge_map_.resize(pdegree_);
-    scounts_.resize(pdegree_);
-    sdispls_.resize(pdegree_);
-    rcounts_.resize(rdegree_);
-    rdispls_.resize(rdegree_);
-
-    MPI_Dist_graph_create_adjacent(comm_, sources_.size(), (int*)sources_.data(), 
-        MPI_UNWEIGHTED, targets_.size(), (int*)targets_.data(), MPI_UNWEIGHTED, 
-        MPI_INFO_NULL, 0 /*reorder ranks?*/, &gcomm_);
-
-    // indegree/outdegree checking...
-    int weighted, indegree, outdegree;
-    MPI_Dist_graph_neighbors_count(gcomm_, &indegree, &outdegree, &weighted);
-
-    // to get sources/targets, use MPI_Dist_graph_neighbors
-    assert(indegree == rdegree_);
-    assert(outdegree == pdegree_);
 
     MPI_Barrier(comm_);
 
@@ -361,7 +369,8 @@ class TriangulateMapNcol
       sdispls_.clear();
       rdispls_.clear();
 
-      MPI_Comm_free(&gcomm_);
+      if (gcomm_ != MPI_COMM_NULL)
+        MPI_Comm_free(&gcomm_);
     }
 
     inline bool check_edgelist(GraphElem tup[2])
@@ -412,10 +421,10 @@ class TriangulateMapNcol
       }
 
       sbuf_.resize(disp);
+      disp = 0;
 
       MPI_Neighbor_alltoall_c(scounts_.data(), 1, MPI_COUNT, rcounts_.data(), 1, MPI_COUNT, gcomm_);
 
-      disp = 0;
       for (auto const& p: sources_)
       {
         rdispls_[rindex_[p]] = disp;
