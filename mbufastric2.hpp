@@ -412,7 +412,7 @@ class TriangulateMapNcol
 
     inline void nalltoall_params()
     {
-      MPI_Count disp = 0;
+      MPI_Aint disp = 0;
       for (auto const& p: targets_)
       {
         sdispls_[pindex_[p]] = disp;
