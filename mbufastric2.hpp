@@ -416,7 +416,7 @@ class TriangulateMapNcol
       for (auto const& p: targets_)
       {
         sdispls_[pindex_[p]] = disp;
-        scounts_[pindex_[p]] = edge_map_[pindex_[p]].size();
+        scounts_[pindex_[p]] = edge_map_[pindex_[p]].size() + edge_map_[pindex_[p]].count();
         disp += scounts_[pindex_[p]];
       }
 
