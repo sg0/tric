@@ -441,8 +441,8 @@ class TriangulateMapNcol
       for (auto const& p: targets_)
         edge_map_[pindex_[p]].serialize(&sbuf_[sdispls_[pindex_[p]]]);
       
-      MPI_Neighbor_alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_COUNT, 
-          rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_COUNT, gcomm_);
+      MPI_Neighbor_alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
+          rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
     }
 
     inline void lookup_edges()
@@ -528,7 +528,8 @@ class TriangulateMapNcol
     GraphElem ntriangles_, pdegree_, rdegree_;
     GraphElem *erange_;
 
-    std::vector<GraphElem> sbuf_, rbuf_, targets_, sources_;
+    std::vector<GraphElem> sbuf_, rbuf_; 
+    std::vector<int> targets_, sources_;
     std::vector<MapUniq> edge_map_;
 
     std::vector<MPI_Count> scounts_, rcounts_;
