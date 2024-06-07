@@ -84,7 +84,6 @@ class MapUniq
 #else
           data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
 #endif
-          count_ += 2;
         }
       }
       else
@@ -100,7 +99,6 @@ class MapUniq
         data_.emplace(key, std::vector<std::pair<GraphElem, GraphElem>>());
         data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
 #endif
-        count_ += 2;
       }
     }
 
@@ -117,42 +115,47 @@ class MapUniq
       for (auto it = data_.begin(); it != data_.end(); ++it)
       {
         *ptr++ = it->first;
+
         for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
         {
           *ptr++ = vit->first;
           *ptr++ = vit->second;
         }
+        
         *ptr++ = -1;
       }
     }
-
-    GraphElem size() const
-    { return data_.size(); }
     
-    GraphElem count() const
-    { return count_ + this->size(); }
-
-    GraphElem do_count() const
+    inline GraphElem count()
     {
-      GraphElem mcnt = this->size(); 
-      
+      count_ = 0;
       for (auto it = data_.begin(); it != data_.end(); ++it)
+      {
+        count_ += 2;
         for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
-          mcnt += 2;
+          count_ += 2;
+      }
       
-      return mcnt;
+      return count_;
     }
+
+    GraphElem size() const { return data_.size(); }
 
     void print() const
     {
-      std::cout << "#Elements (keys/values): " << this->count() << std::endl;
+      GraphElem count = 0;
       for (auto it = data_.begin(); it != data_.end(); ++it)
       {
+        count += 1;
         std::cout << "map[" << it->first << "]: ";
         for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
+        {
           std::cout << vit->first << "," << vit->second << " ";
+          count += 2;
+        }
         std::cout << std::endl;
       }
+      std::cout << "#Elements (keys/values): " << count << std::endl;
     }
 
     void reserve(const size_t count)
@@ -416,7 +419,7 @@ class TriangulateMapNcol
       for (auto const& p: targets_)
       {
         sdispls_[pindex_[p]] = disp;
-        scounts_[pindex_[p]] = edge_map_[pindex_[p]].size() + edge_map_[pindex_[p]].count();
+        scounts_[pindex_[p]] = edge_map_[pindex_[p]].count();
         disp += scounts_[pindex_[p]];
       }
 
@@ -434,10 +437,10 @@ class TriangulateMapNcol
       rbuf_.resize(disp);
     }
 
-    inline void flatten_nalltoallv()
+    inline void nalltoallv()
     {
       nalltoall_params();
-
+      
       for (auto const& p: targets_)
         edge_map_[pindex_[p]].serialize(&sbuf_[sdispls_[pindex_[p]]]);
       
@@ -509,7 +512,7 @@ class TriangulateMapNcol
       if (size_ > 1)
       {
         lookup_edges();
-        flatten_nalltoallv();
+        nalltoallv();
         process_incoming();
       }
 
