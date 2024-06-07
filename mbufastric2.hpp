@@ -84,6 +84,7 @@ class MapUniq
 #else
           data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
 #endif
+          count_ += 2;
         }
       }
       else
@@ -99,6 +100,7 @@ class MapUniq
         data_.emplace(key, std::vector<std::pair<GraphElem, GraphElem>>());
         data_[key].emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
 #endif
+        count_ += 2;
       }
     }
 
@@ -121,41 +123,24 @@ class MapUniq
           *ptr++ = vit->first;
           *ptr++ = vit->second;
         }
-        
+       
         *ptr++ = -1;
       }
     }
     
-    inline GraphElem count()
-    {
-      count_ = 0;
-      for (auto it = data_.begin(); it != data_.end(); ++it)
-      {
-        count_ += 2;
-        for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
-          count_ += 2;
-      }
-      
-      return count_;
-    }
-
+    GraphElem count() const { return count_; }
     GraphElem size() const { return data_.size(); }
 
     void print() const
     {
-      GraphElem count = 0;
       for (auto it = data_.begin(); it != data_.end(); ++it)
       {
-        count += 1;
         std::cout << "map[" << it->first << "]: ";
         for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
-        {
           std::cout << vit->first << "," << vit->second << " ";
-          count += 2;
-        }
         std::cout << std::endl;
       }
-      std::cout << "#Elements (keys/values): " << count << std::endl;
+      std::cout << "#Elements (keys/values): " << count() << std::endl;
     }
 
     void reserve(const size_t count)
@@ -356,7 +341,8 @@ class TriangulateMapNcol
 
     void clear()
     {
-      delete []erange_;
+      if (size_ > 1)
+        delete []erange_;
 
       sbuf_.clear();
       rbuf_.clear();
