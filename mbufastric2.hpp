@@ -361,7 +361,7 @@ class TriangulateMapNcol
       rdispls_.clear();
 
       if (gcomm_ != MPI_COMM_NULL)
-        MPI_Comm_free(&gcomm_);
+          MPI_Comm_free(&gcomm_);
     }
 
     inline bool check_edgelist(GraphElem tup[2])
