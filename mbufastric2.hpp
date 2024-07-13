@@ -129,7 +129,7 @@ class MapUniq
     }
     
     GraphElem size() const { return data_.size(); }
-    GraphElem count() const { return count_ + size(); }
+    GraphElem count() const { return count_ + this->size(); }
 
     void print() const
     {
@@ -351,7 +351,7 @@ class TriangulateMapNcol
       targets_.clear();
       sources_.clear();
       
-      for (size_t s = 0; s < edge_map_.size(); s++)
+      for (int s = 0; s < pdegree_; s++)
           edge_map_[s].clear();
       edge_map_.clear();
 
@@ -407,7 +407,10 @@ class TriangulateMapNcol
       for (auto const& p: targets_)
       {
         sdispls_[pindex_[p]] = disp;
-        scounts_[pindex_[p]] = edge_map_[pindex_[p]].count() + edge_map_[pindex_[p]].size();
+
+        if (edge_map_[pindex_[p]].size() > 0)
+            scounts_[pindex_[p]] = edge_map_[pindex_[p]].count() + edge_map_[pindex_[p]].size();
+        
         disp += scounts_[pindex_[p]];
       }
 
@@ -431,8 +434,11 @@ class TriangulateMapNcol
       nalltoall_params();
       
       for (auto const& p: targets_)
-        edge_map_[pindex_[p]].serialize(&sbuf_[sdispls_[pindex_[p]]]);
-      
+      {
+          if (edge_map_[pindex_[p]].size() > 0)
+              edge_map_[pindex_[p]].serialize(&sbuf_[sdispls_[pindex_[p]]]);
+      }
+
       if (sbuf_.data() != nullptr)
           MPI_Neighbor_alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
           rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
