@@ -127,7 +127,7 @@ class MapUniq
         *ptr++ = -1;
       }
     }
-    
+
     GraphElem size() const { return data_.size(); }
     GraphElem count() const { return count_ + this->size(); }
 
@@ -147,7 +147,7 @@ class MapUniq
     { data_.reserve(count); }
 
   private:
-    GraphElem count_;
+    size_t count_;
 #if defined(USE_STD_MAP_MAP)
     std::map<GraphElem, std::map<GraphElem, GraphElem>> data_;
 #elif defined(USE_STD_UNO_MAP_MAP)
@@ -418,7 +418,13 @@ class TriangulateMapNcol
       disp = 0;
 
       if (scounts_.data() != nullptr)
+      {
+#if defined(USE_MPI_LARGE_COUNTS)
           MPI_Neighbor_alltoall_c(scounts_.data(), 1, MPI_COUNT, rcounts_.data(), 1, MPI_COUNT, gcomm_);
+#else
+          MPI_Neighbor_alltoall(scounts_.data(), 1, MPI_INT, rcounts_.data(), 1, MPI_INT, gcomm_);
+#endif
+      }
 
       for (auto const& p: sources_)
       {
@@ -440,9 +446,14 @@ class TriangulateMapNcol
       }
 
       if (sbuf_.data() != nullptr)
+#if defined(USE_MPI_LARGE_COUNTS)
           MPI_Neighbor_alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
           rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
-    }
+#else
+          MPI_Neighbor_alltoallv(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
+          rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
+#endif
+      }
 
     inline void lookup_edges()
     {
@@ -531,8 +542,13 @@ class TriangulateMapNcol
     std::vector<int> targets_, sources_;
     std::vector<MapUniq> edge_map_;
 
+#if defined(USE_MPI_LARGE_COUNTS)
     std::vector<MPI_Count> scounts_, rcounts_;
     std::vector<MPI_Aint> sdispls_, rdispls_;
+#else
+    std::vector<int> scounts_, rcounts_;
+    std::vector<int> sdispls_, rdispls_;
+#endif
 
     int rank_, size_;
     std::unordered_map<GraphElem, GraphElem> pindex_, rindex_; 
