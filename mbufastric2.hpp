@@ -128,8 +128,8 @@ class MapUniq
       }
     }
     
-    GraphElem count() const { return count_; }
     GraphElem size() const { return data_.size(); }
+    GraphElem count() const { return count_ + size(); }
 
     void print() const
     {
@@ -284,7 +284,6 @@ class TriangulateMapNcol
       // outgoing/incoming data and buffer size
       MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
 
-
       for (GraphElem p = 0; p < size_; p++)
       {
         if (send_count[p] > 0)
@@ -351,6 +350,9 @@ class TriangulateMapNcol
       rindex_.clear();
       targets_.clear();
       sources_.clear();
+      
+      for (size_t s = 0; s < edge_map_.size(); s++)
+          edge_map_[s].clear();
       edge_map_.clear();
 
       scounts_.clear();
@@ -405,7 +407,7 @@ class TriangulateMapNcol
       for (auto const& p: targets_)
       {
         sdispls_[pindex_[p]] = disp;
-        scounts_[pindex_[p]] = edge_map_[pindex_[p]].count();
+        scounts_[pindex_[p]] = edge_map_[pindex_[p]].count() + edge_map_[pindex_[p]].size();
         disp += scounts_[pindex_[p]];
       }
 
