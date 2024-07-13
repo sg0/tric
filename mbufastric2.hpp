@@ -414,7 +414,8 @@ class TriangulateMapNcol
       sbuf_.resize(disp);
       disp = 0;
 
-      MPI_Neighbor_alltoall_c(scounts_.data(), 1, MPI_COUNT, rcounts_.data(), 1, MPI_COUNT, gcomm_);
+      if (scounts_.data() != nullptr)
+          MPI_Neighbor_alltoall_c(scounts_.data(), 1, MPI_COUNT, rcounts_.data(), 1, MPI_COUNT, gcomm_);
 
       for (auto const& p: sources_)
       {
@@ -432,7 +433,8 @@ class TriangulateMapNcol
       for (auto const& p: targets_)
         edge_map_[pindex_[p]].serialize(&sbuf_[sdispls_[pindex_[p]]]);
       
-      MPI_Neighbor_alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
+      if (sbuf_.data() != nullptr)
+          MPI_Neighbor_alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
           rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
     }
 
