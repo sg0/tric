@@ -141,7 +141,7 @@ class MapUniq
     }
 
     GraphElem size() const { return data_.size(); }
-    GraphElem count() const { return count_ + 2*data_.size(); }
+    GraphElem count() const { return count_ + 2*this->size(); }
 
     void print() const
     {
@@ -154,9 +154,6 @@ class MapUniq
       }
       std::cout << "#Elements (keys/values): " << count() << std::endl;
     }
-
-    void reserve(const size_t count)
-    { data_.reserve(count); }
 
   private:
     size_t count_;
@@ -270,11 +267,11 @@ class TriangulateMapNcol
           {
             Edge const& edge_n = g_->get_edge(n);
              
-            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-              continue;
-
             if (!edge_within_max(edge_m.tail_, edge_n.tail_))
               break;
+
+            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+              continue;
 
 #if defined(USE_OPENMP)
 #pragma omp atomic
@@ -470,10 +467,7 @@ class TriangulateMapNcol
       for (int p = 0; p < size_; p++)
       {
         sdispls_[p] = disp;
-
-        if (edge_map_[p].size() > 0)
-            scounts_[p] = edge_map_[p].count();
-        
+        scounts_[p] = edge_map_[p].count();
         disp += scounts_[p];
       }
 
@@ -528,7 +522,7 @@ class TriangulateMapNcol
     inline void nalltoallv()
     {
         nalltoall_params();
-
+        
         for (int p = 0; p < size_; p++)
         {
             if (edge_map_[p].size() > 0)
@@ -571,12 +565,12 @@ class TriangulateMapNcol
             for (GraphElem n = m + 1; n < e1; n++)
             {  
               Edge const& edge_n = g_->get_edge(n);                                
-
-              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-                continue;
-
+              
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
+                
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                continue;
 
 #if defined(USE_MPI_NBR_COLL)
               edge_map_[pidx].insert(edge_m.tail_, edge_n.tail_);
@@ -594,6 +588,9 @@ class TriangulateMapNcol
       GraphElem tup[2] = {0};
       for (GraphElem k = 0; k < rbuf_.size();)
       {
+        if (rbuf_[k] == -1)
+            continue;
+
         tup[0] = rbuf_[k];
 
         for (GraphElem m = k + 1; m < rbuf_.size(); m+=2)

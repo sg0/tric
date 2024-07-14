@@ -134,11 +134,11 @@ class MapUniq
     { return data_.size(); }
     
     GraphElem count() const
-    { return count_ + this->size(); }
+    { return count_ + 2*this->size(); }
 
     GraphElem do_count() const
     {
-      GraphElem mcnt = this->size(); 
+      GraphElem mcnt = 0; 
       
       for (auto it = data_.begin(); it != data_.end(); ++it)
         for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
@@ -263,7 +263,8 @@ class TriangulateAggrBufferedMap
                 
             if (!edge_within_max(edge_m.edge_->tail_, edge_n.tail_))
               break;
-            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+            //if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.edge_->tail_))
+            if (!edge_above_min(edge_m.edge_->tail_, edge_n.tail_))
               continue;
 
             send_count[owner] += 1;
@@ -367,7 +368,8 @@ class TriangulateAggrBufferedMap
         edge_map_[pindex_[owner]].serialize(&sbuf_[pindex_[owner]*bufsize_]);
 
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], 
-            edge_map_[pindex_[owner]].size() + edge_map_[pindex_[owner]].count(),
+            edge_map_[pindex_[owner]].count(),
+            //edge_map_[pindex_[owner]].size() + edge_map_[pindex_[owner]].count(),
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);      
       }
     }
@@ -405,7 +407,8 @@ class TriangulateAggrBufferedMap
           
             if (m >= prev_m_[pidx])
             {
-              if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3)) // 3 because an insertion could be the triplet: key:{val,count}
+              //if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3)) // 3 because an insertion could be the triplet: key:{val,count}
+              if ((edge_map_[pidx].count()) >= (bufsize_ - 3)) // 3 because an insertion could be the triplet: key:{val,count}
               {
                 prev_m_[pidx] = m;
                 prev_k_[pidx] = -1;
@@ -422,10 +425,12 @@ class TriangulateAggrBufferedMap
                 
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
+                //if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
                   continue;
 
-                if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3))
+                //if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3))
+                if ((edge_map_[pidx].count()) >= (bufsize_ - 3))
                 {
                   prev_m_[pidx] = m;
                   prev_k_[pidx] = n;
@@ -448,7 +453,8 @@ class TriangulateAggrBufferedMap
                 
                 edge.active_ = false;
                 
-                if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3))
+                //if ((edge_map_[pidx].size() + edge_map_[pidx].count()) >= (bufsize_ - 3))
+                if ((edge_map_[pidx].count()) >= (bufsize_ - 3))
                 {
                   stat_[pidx] = '1';
                   flatten_nbsend(owner);
