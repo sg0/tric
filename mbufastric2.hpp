@@ -127,9 +127,21 @@ class MapUniq
         *ptr++ = -1;
       }
     }
+    
+    inline size_t do_count()
+    {
+      size_t count = 0;
+      for (auto it = data_.begin(); it != data_.end(); ++it)
+      {
+        for (auto vit = it->second.begin(); vit != it->second.end(); ++vit)
+          count+=2;
+        count += 2;
+      }
+      return count;
+    }
 
     GraphElem size() const { return data_.size(); }
-    GraphElem count() const { return count_ + this->size(); }
+    GraphElem count() const { return count_ + 2*data_.size(); }
 
     void print() const
     {
@@ -167,11 +179,17 @@ class TriangulateMapNcol
 {
   public:
 
+#if defined(USE_MPI_NBR_COLL)
   TriangulateMapNcol(Graph* g): 
       g_(g), sbuf_(0), rbuf_(0), pdegree_(0), erange_(nullptr), 
       ntriangles_(0), pindex_(0), rindex_(0), sources_(0), targets_(0), 
       edge_map_(0), rdegree_(0), scounts_(0), rcounts_(0), sdispls_(0), 
       rdispls_(0), gcomm_(MPI_COMM_NULL)
+#else
+  TriangulateMapNcol(Graph* g): 
+      g_(g), sbuf_(0), rbuf_(0), erange_(nullptr), ntriangles_(0),  
+      edge_map_(0), scounts_(0), rcounts_(0), sdispls_(0), rdispls_(0)
+#endif
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -212,7 +230,7 @@ class TriangulateMapNcol
           MPI_SUM, comm_);
     }
 
-#if defined(USE_OPENMP)
+#if defined(USE_OPENMP) && defined(USE_MPI_NBR_COLL)
 #pragma omp declare reduction(merge : std::vector<int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
 #pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(merge: targets_) schedule(static)
 #endif    
@@ -243,10 +261,11 @@ class TriangulateMapNcol
         }
         else
         {  
+#if defined(USE_MPI_NBR_COLL)
           if (std::find(targets_.begin(), targets_.end(), owner) 
               == targets_.end())
             targets_.push_back(static_cast<GraphElem>(owner));
-
+#endif
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
@@ -284,6 +303,7 @@ class TriangulateMapNcol
       // outgoing/incoming data and buffer size
       MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
 
+#if defined(USE_MPI_NBR_COLL)
       for (GraphElem p = 0; p < size_; p++)
       {
         if (send_count[p] > 0)
@@ -319,6 +339,13 @@ class TriangulateMapNcol
       // to get sources/targets, use MPI_Dist_graph_neighbors
       assert(indegree == rdegree_);
       assert(outdegree == pdegree_);
+#else
+      edge_map_.resize(size_);
+      scounts_.resize(size_);
+      sdispls_.resize(size_);
+      rcounts_.resize(size_);
+      rdispls_.resize(size_);
+#endif
     }
 
     MPI_Barrier(comm_);
@@ -346,22 +373,22 @@ class TriangulateMapNcol
       sbuf_.clear();
       rbuf_.clear();
 
+#if defined(USE_MPI_NBR_COLL)
       pindex_.clear();
       rindex_.clear();
       targets_.clear();
       sources_.clear();
-      
-      for (int s = 0; s < pdegree_; s++)
-          edge_map_[s].clear();
+
+      if (gcomm_ != MPI_COMM_NULL)
+          MPI_Comm_free(&gcomm_);
+#endif
+
       edge_map_.clear();
 
       scounts_.clear();
       rcounts_.clear();
       sdispls_.clear();
       rdispls_.clear();
-
-      if (gcomm_ != MPI_COMM_NULL)
-          MPI_Comm_free(&gcomm_);
     }
 
     inline bool check_edgelist(GraphElem tup[2])
@@ -401,6 +428,7 @@ class TriangulateMapNcol
       return false;
     }
 
+#if defined(USE_MPI_NBR_COLL)
     inline void nalltoall_params()
     {
       MPI_Aint disp = 0;
@@ -409,7 +437,7 @@ class TriangulateMapNcol
         sdispls_[pindex_[p]] = disp;
 
         if (edge_map_[pindex_[p]].size() > 0)
-            scounts_[pindex_[p]] = edge_map_[pindex_[p]].count() + edge_map_[pindex_[p]].size();
+            scounts_[pindex_[p]] = edge_map_[pindex_[p]].count();
         
         disp += scounts_[pindex_[p]];
       }
@@ -434,26 +462,91 @@ class TriangulateMapNcol
 
       rbuf_.resize(disp);
     }
-
-    inline void nalltoallv()
+#else
+    inline void nalltoall_params()
     {
-      nalltoall_params();
-      
-      for (auto const& p: targets_)
+      MPI_Aint disp = 0;
+
+      for (int p = 0; p < size_; p++)
       {
-          if (edge_map_[pindex_[p]].size() > 0)
-              edge_map_[pindex_[p]].serialize(&sbuf_[sdispls_[pindex_[p]]]);
+        sdispls_[p] = disp;
+
+        if (edge_map_[p].size() > 0)
+            scounts_[p] = edge_map_[p].count();
+        
+        disp += scounts_[p];
       }
 
-      if (sbuf_.data() != nullptr)
+      sbuf_.resize(disp);
+      disp = 0;
+
+      if (scounts_.data() != nullptr)
+      {
 #if defined(USE_MPI_LARGE_COUNTS)
-          MPI_Neighbor_alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
-          rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
+          MPI_Alltoall_c(scounts_.data(), 1, MPI_COUNT, rcounts_.data(), 1, MPI_COUNT, comm_);
 #else
-          MPI_Neighbor_alltoallv(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
-          rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
+          MPI_Alltoall(scounts_.data(), 1, MPI_INT, rcounts_.data(), 1, MPI_INT, comm_);
 #endif
       }
+
+      for (int p = 0; p < size_; p++)
+      {
+        rdispls_[p] = disp;
+        disp += rcounts_[p];
+      }
+
+      rbuf_.resize(disp);
+    }
+#endif
+
+#if defined(USE_MPI_NBR_COLL)
+    inline void nalltoallv()
+    {
+        nalltoall_params();
+
+        MPI_Barrier(comm_);
+
+        for (auto const& p: targets_)
+        {
+            if (edge_map_[pindex_[p]].size() > 0)
+                edge_map_[pindex_[p]].serialize(&sbuf_[sdispls_[pindex_[p]]]);
+        }
+
+        if (sbuf_.data() != nullptr)
+        {
+#if defined(USE_MPI_LARGE_COUNTS)
+            MPI_Neighbor_alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
+                    rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
+#else
+            MPI_Neighbor_alltoallv(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
+                    rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, gcomm_);
+#endif
+        }
+        MPI_Barrier(comm_);
+    }
+#else
+    inline void nalltoallv()
+    {
+        nalltoall_params();
+
+        for (int p = 0; p < size_; p++)
+        {
+            if (edge_map_[p].size() > 0)
+                edge_map_[p].serialize(&sbuf_[sdispls_[p]]);
+        }
+
+        if (sbuf_.data() != nullptr)
+        {
+#if defined(USE_MPI_LARGE_COUNTS)
+            MPI_Alltoallv_c(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
+                    rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, comm_);
+#else
+            MPI_Alltoallv(sbuf_.data(), scounts_.data(), sdispls_.data(), MPI_GRAPH_TYPE, 
+                    rbuf_.data(), rcounts_.data(), rdispls_.data(), MPI_GRAPH_TYPE, comm_);
+#endif
+        }
+    }
+#endif
 
     inline void lookup_edges()
     {
@@ -470,8 +563,9 @@ class TriangulateMapNcol
         {
           Edge const& edge_m = g_->get_edge(m);
           const int owner = g_->get_owner(edge_m.tail_);
+#if defined(USE_MPI_NBR_COLL)
           const GraphElem pidx = pindex_[owner];
-
+#endif
           if (owner != rank_)
           {   
             for (GraphElem n = m + 1; n < e1; n++)
@@ -484,7 +578,11 @@ class TriangulateMapNcol
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
 
+#if defined(USE_MPI_NBR_COLL)
               edge_map_[pidx].insert(edge_m.tail_, edge_n.tail_);
+#else
+              edge_map_[owner].insert(edge_m.tail_, edge_n.tail_);
+#endif
             }
           }
         }
@@ -527,19 +625,24 @@ class TriangulateMapNcol
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
-      clear();
-
       return (ttc/3);
     }
 
   private:
     Graph* g_;
 
-    GraphElem ntriangles_, pdegree_, rdegree_;
+    GraphElem ntriangles_;
     GraphElem *erange_;
 
     std::vector<GraphElem> sbuf_, rbuf_; 
+
+#if defined(USE_MPI_NBR_COLL)
     std::vector<int> targets_, sources_;
+    GraphElem pdegree_, rdegree_;
+    std::unordered_map<GraphElem, GraphElem> pindex_, rindex_; 
+    MPI_Comm gcomm_;
+#endif
+
     std::vector<MapUniq> edge_map_;
 
 #if defined(USE_MPI_LARGE_COUNTS)
@@ -551,7 +654,6 @@ class TriangulateMapNcol
 #endif
 
     int rank_, size_;
-    std::unordered_map<GraphElem, GraphElem> pindex_, rindex_; 
-    MPI_Comm comm_, gcomm_;
+    MPI_Comm comm_;
 };
 #endif
