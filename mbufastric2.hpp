@@ -193,8 +193,10 @@ class TriangulateMapNcol
     MPI_Comm_rank(comm_, &rank_);
 
     const GraphElem lnv = g_->get_lnv();
+#if defined(USE_MPI_NBR_COLL)
     GraphElem *send_count  = new GraphElem[size_]();
     GraphElem *recv_count  = new GraphElem[size_]();
+#endif
 
     double t0 = MPI_Wtime();
     
@@ -226,6 +228,15 @@ class TriangulateMapNcol
       MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
           MPI_SUM, comm_);
     }
+
+#if defined(USE_MPI_NBR_COLL)
+#else
+      edge_map_.resize(size_);
+      scounts_.resize(size_);
+      sdispls_.resize(size_);
+      rcounts_.resize(size_);
+      rdispls_.resize(size_);
+#endif
 
 #if defined(USE_OPENMP) && defined(USE_MPI_NBR_COLL)
 #pragma omp declare reduction(merge : std::vector<int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
@@ -273,10 +284,17 @@ class TriangulateMapNcol
             if (!edge_above_min(edge_m.tail_, edge_n.tail_))
               continue;
 
+#if defined(USE_MPI_NBR_COLL)
+#else
+            edge_map_[owner].insert(edge_m.tail_, edge_n.tail_);
+#endif
+
+#if defined(USE_MPI_NBR_COLL)
 #if defined(USE_OPENMP)
 #pragma omp atomic
 #endif
             send_count[owner] += 1;
+#endif
           }
         }
       }
@@ -295,12 +313,12 @@ class TriangulateMapNcol
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
      
+#if defined(USE_MPI_NBR_COLL)
     if (size_ > 1)
     {       
       // outgoing/incoming data and buffer size
       MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
 
-#if defined(USE_MPI_NBR_COLL)
       for (GraphElem p = 0; p < size_; p++)
       {
         if (send_count[p] > 0)
@@ -336,14 +354,11 @@ class TriangulateMapNcol
       // to get sources/targets, use MPI_Dist_graph_neighbors
       assert(indegree == rdegree_);
       assert(outdegree == pdegree_);
-#else
-      edge_map_.resize(size_);
-      scounts_.resize(size_);
-      sdispls_.resize(size_);
-      rcounts_.resize(size_);
-      rdispls_.resize(size_);
-#endif
+
+      delete []send_count;
+      delete []recv_count;
     }
+#endif
 
     MPI_Barrier(comm_);
 
@@ -355,9 +370,6 @@ class TriangulateMapNcol
         std::cout << j << ": " << erange_[i] << ", " << erange_[i+1] << std::endl;
     }
 #endif
-
-    delete []send_count;
-    delete []recv_count;
   }
 
     ~TriangulateMapNcol() {}
@@ -613,7 +625,9 @@ class TriangulateMapNcol
     {
       if (size_ > 1)
       {
+#if defined(USE_MPI_NBR_COLL)
         lookup_edges();
+#endif
         nalltoallv();
         process_incoming();
       }
