@@ -65,6 +65,7 @@ class MapUniq
       count_ = 0;
     }
 
+#if defined(USE_STD_MAP) || defined(USE_STD_MAP_MAP) || defined(USE_STD_MAP_UNO_MAP) || defined(USE_STD_UNO_MAP_MAP) || defined(USE_STD_UNO_MAP_UNO_MAP)
     inline void insert(GraphElem key, GraphElem value)
     {
       if (data_.count(key) > 0)
@@ -103,6 +104,32 @@ class MapUniq
         count_ += 2;
       }
     }
+#else
+    void insert(GraphElem key, GraphElem value)
+    {
+      auto it_key = std::find_if(data_.begin(), data_.end(),
+                [&key](const std::pair<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>>& element){ return element.first == key;} );
+ 
+      if (it_key != data_.end())
+      {
+        auto it_data = std::find_if(it_key->second.begin(), it_key->second.end(),
+                [&value](const std::pair<GraphElem, GraphElem>& element){ return element.first == value;} );
+        
+        if (it_data != it_key->second.end())
+          it_data->second += 1;
+        else
+        {
+          it_key->second.emplace_back(std::pair<GraphElem, GraphElem>(value, 1));
+          count_ += 2;
+        }
+      }
+      else
+      {
+        data_.emplace_back(std::make_pair(key, std::vector<std::pair<GraphElem, GraphElem>>{std::make_pair(value,1)}));
+        count_ += 2;
+      }
+    }
+#endif
 
     inline void clear() 
     {
@@ -168,7 +195,7 @@ class MapUniq
 #elif defined(USE_STD_MAP)
     std::map<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>> data_;
 #else
-    std::unordered_map<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>> data_;
+    std::vector<std::pair<GraphElem, std::vector<std::pair<GraphElem, GraphElem>>>> data_;
 #endif
 };
 
