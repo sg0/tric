@@ -65,8 +65,7 @@ Possible options (can be combined):
 6.  -r <nranks>     : This is used to control the number of aggregators in MPI I/O and is
                       meaningful when an input binary graph file is passed with option "-f".
                       naggr := (nranks > 1) ? (nprocs/nranks) : nranks;
-7.  -a              : <soon> 
-8.  -s <size>       : Buffer size, only relevant when -DAGGR_<> is passed for aggregate-buffered 
+7.  -s <size>       : Buffer size, only relevant when -DAGGR_<> is passed for aggregate-buffered 
                       triangle counting. Default buffer size can be set by updating DEFAULT_BUF_SIZE. 
 
 Please try the default version (no need to pass any macro in the Makefile) or the aggregate-buffered
