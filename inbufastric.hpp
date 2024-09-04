@@ -65,7 +65,7 @@ class TriangulateAggrBufferedInrecv
       pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), sources_(0), bufsize_(0), rreq_(nullptr),
-      ract_(nullptr), recv_count_(nullptr), rindex_(0), rdegree_(0)
+      recv_count_(nullptr), rindex_(0), rdegree_(0)
 #if defined(RECV_MAP)
       , rmap_({})
 #endif
@@ -206,7 +206,6 @@ class TriangulateAggrBufferedInrecv
     
     rbuf_     = new GraphElem[rdegree_*bufsize_];
     rreq_     = new MPI_Request[rdegree_];
-    ract_     = new char[rdegree_];
 
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
@@ -214,7 +213,6 @@ class TriangulateAggrBufferedInrecv
     std::fill(stat_, stat_ + pdegree_, '0');
     
     std::fill(rreq_, rreq_ + rdegree_, MPI_REQUEST_NULL);
-    std::fill(ract_, ract_ + rdegree_, '0');
 
     MPI_Barrier(comm_);
 
@@ -282,11 +280,10 @@ class TriangulateAggrBufferedInrecv
 #endif
       for (int p = 0; p < rdegree_; p++)
       {
-        if (ract_[p] == '0' && recv_count_[sources_[p]] > 0)
+        if (recv_count_[sources_[p]] > 0)
         {
           MPI_Irecv(&rbuf_[p*bufsize_], bufsize_, 
               MPI_GRAPH_TYPE, sources_[p], TAG_DATA, comm_, &rreq_[p]);
-          ract_[p] = '1';
         }
       }
     }
@@ -498,8 +495,6 @@ class TriangulateAggrBufferedInrecv
           GraphElem tup[2] = {-1,-1}, prev = 0;
           int count = 0;
 
-          ract_[p] = '0';
-
           const int source = status.MPI_SOURCE;
 
           MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
@@ -551,7 +546,6 @@ class TriangulateAggrBufferedInrecv
             {
               MPI_Irecv(&rbuf_[p*bufsize_], bufsize_, 
                   MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[p]);
-              ract_[p] = '1';
             }
           }
         }
@@ -637,7 +631,7 @@ class TriangulateAggrBufferedInrecv
     GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_, rdegree_;
     GraphElem *sbuf_, *rbuf_, *recv_count_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
     MPI_Request *sreq_, *rreq_;
-    char *stat_, *ract_;
+    char *stat_;
     
     std::vector<int> targets_, sources_;
     int rank_, size_;
