@@ -254,7 +254,7 @@ class TriangulateAggrBufferedInrecv
       sources_.clear();
     }
 
-    void nbsend(GraphElem owner)
+    inline void nbsend(int owner)
     {
       if (stat_[pindex_[owner]] == '0' && sbuf_ctr_[pindex_[owner]] > 0)
       {
@@ -264,13 +264,22 @@ class TriangulateAggrBufferedInrecv
       }
     }
 
-    void nbsend()
+    inline void nbsend()
     {
 #if defined(USE_OPENMP) && !defined(RECV_MAP)
 #pragma omp parallel for default(shared)
 #endif
-      for (GraphElem p = 0; p < pdegree_; p++)
+      for (int p = 0; p < pdegree_; p++)
         nbsend(targets_[p]);
+    }
+
+    inline void nbrecv(int source)
+    {
+        if (recv_count_[source] > 0)
+        {
+          MPI_Irecv(&rbuf_[rindex_[source]*bufsize_], bufsize_, 
+              MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[rindex_[source]]);
+        }
     }
 
     inline void nbrecv()
@@ -279,13 +288,7 @@ class TriangulateAggrBufferedInrecv
 #pragma omp parallel for default(shared)
 #endif
       for (int p = 0; p < rdegree_; p++)
-      {
-        if (recv_count_[sources_[p]] > 0)
-        {
-          MPI_Irecv(&rbuf_[p*bufsize_], bufsize_, 
-              MPI_GRAPH_TYPE, sources_[p], TAG_DATA, comm_, &rreq_[p]);
-        }
-      }
+        nbrecv(sources_[p]);
     }
     
     inline void lookup_edges()
