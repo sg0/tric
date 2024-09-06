@@ -136,11 +136,11 @@ class TriangulateAggrBufferedInrecv
           {
             Edge const& edge_n = g_->get_edge(n);
              
-            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-              continue;
-
             if (!edge_within_max(edge_m.tail_, edge_n.tail_))
               break;
+            
+            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+              continue;
 
             send_count[owner] += 1;
             vcount_[i] += 1;
@@ -334,12 +334,9 @@ class TriangulateAggrBufferedInrecv
               {  
                 Edge const& edge_n = g_->get_edge(n);                                
                                   
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
-                  continue;
-
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
-
+                
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
                   prev_m_[pidx] = m;
@@ -352,7 +349,10 @@ class TriangulateAggrBufferedInrecv
 
                   break;
                 }
-                              
+                
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+                  continue;
+             
                 sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
                 sbuf_ctr_[pidx] += 1;
                 
@@ -433,14 +433,14 @@ class TriangulateAggrBufferedInrecv
          
     inline bool edge_above_min(GraphElem x, GraphElem y) const
     {
-      if (y >= erange_[x*2])
+      if (y >= erange_[x*2] || x >= erange_[y*2])
         return true;
       return false;
     }
 
     inline bool edge_within_max(GraphElem x, GraphElem y) const
     {
-      if (y <= erange_[x*2+1])
+      if (y <= erange_[x*2+1] || x <= erange_[y*2+1])
         return true;
       return false;
     }
