@@ -37,8 +37,8 @@
 //
 // ************************************************************************ 
 #pragma once
-#ifndef INBUFASTRIC_HPP
-#define INBUFASTRIC_HPP
+#ifndef XXTRIC_HPP
+#define XXTRIC_HPP
 
 #include "graph.hpp"
 
@@ -106,10 +106,16 @@ class TriangulateAggrBufferedInrecv
     MPI_Allreduce(MPI_IN_PLACE, erange_, nv*2, MPI_GRAPH_TYPE, 
         MPI_SUM, comm_);
 
+#if defined(USE_OPENMP)
+    GraphElem *tcount = new GraphElem[lnv];
+    std::memset(tcount, 0, sizeof(GraphElem)*lnv);
+#pragma omp parallel for schedule(dynamic) default(shared)
     for (GraphElem i = 0; i < lnv; i++)
     {
       GraphElem e0, e1, tup[2];
+
       g_->edge_range(i, e0, e1);
+      const GraphElem global_i = g_->local_to_global(i);
 
       if ((e0 + 1) == e1)
         continue;
@@ -119,47 +125,147 @@ class TriangulateAggrBufferedInrecv
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
         tup[0] = edge_m.tail_;
+
+        if (global_i > tup[0])
+          continue;
+
         if (owner == rank_)
         {
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
+            
+            if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+              break;
+
+            if (edge_m.tail_ > edge_n.tail_)
+              continue;
+
+            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+              continue;
 
             tup[1] = edge_n.tail_;
+#if defined(FAST_CHECK_EDGELIST)
             if (fast_check_edgelist(tup))
-              ntriangles_ += 1;
+#else
+              if (check_edgelist(tup))
+#endif
+              {
+                tcount[i] += 1;
+              }
           }
         }
         else
         {
-          for (GraphElem n = m + 1; n < e1; n++)
+          if (owner > rank_)
           {
-            Edge const& edge_n = g_->get_edge(n);
-             
-            if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-              break;
-            
-            if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-              continue;
+            for (GraphElem n = m + 1; n < e1; n++)
+            {
+              Edge const& edge_n = g_->get_edge(n);
+               
+              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                break;
+                   
+              if (edge_m.tail_ > edge_n.tail_)
+                continue;
 
-            send_count[owner] += 1;
-            vcount_[i] += 1;
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                continue;
+
+#pragma omp atomic update
+              send_count[owner] += 1;
+              vcount_[i] += 1;
+            }
           }
         }
       }
     }
+    ntriangles_ = std::accumulate(tcount, tcount + lnv, 0);
+    free(tcount);
+#else
+    for (GraphElem i = 0; i < lnv; i++)
+    {
+      GraphElem e0, e1, tup[2];
+      
+      g_->edge_range(i, e0, e1);
+      const GraphElem global_i = g_->local_to_global(i);
 
-    MPI_Barrier(comm_);
+      if ((e0 + 1) == e1)
+        continue;
+
+      for (GraphElem m = e0; m < e1-1; m++)
+      {
+        Edge const& edge_m = g_->get_edge(m);
+        const int owner = g_->get_owner(edge_m.tail_);
+
+        if (global_i > edge_m.tail_)
+            continue;
+
+        if (owner == rank_)
+        {
+            tup[0] = edge_m.tail_;
+            for (GraphElem n = m + 1; n < e1; n++)
+            {
+                Edge const& edge_n = g_->get_edge(n);
+                 
+                if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                  break;
+                               
+                if (edge_m.tail_ > edge_n.tail_)
+                  continue;
+
+                if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                  continue;
+
+                tup[1] = edge_n.tail_;
+#if defined(FAST_CHECK_EDGELIST)
+                if (fast_check_edgelist(tup))
+#else
+                if (check_edgelist(tup))
+#endif
+                    ntriangles_ += 1;
+            }
+        }
+        else
+        {
+            if (owner > rank_)
+            {
+                for (GraphElem n = m + 1; n < e1; n++)
+                {
+                    Edge const& edge_n = g_->get_edge(n);
+                     
+                    if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                        break;
+
+                    if (edge_m.tail_ > edge_n.tail_)
+                      continue;
+
+                    if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                        continue;
+
+                    send_count[owner] += 1;
+                    vcount_[i] += 1;
+                }
+            }
+        }
+      }
+    }
+#endif
 
     double t1 = MPI_Wtime();
-    double p_tot = t1 - t0, t_tot = 0.0;
+        
+    double p_tot = t1 - t0, t_tot = 0.0, t_max = 0.0, t_min = 0.0;
 
+    MPI_Barrier(comm_);
+    
     MPI_Reduce(&p_tot, &t_tot, 1, MPI_DOUBLE, MPI_SUM, 0, comm_);
+    MPI_Reduce(&p_tot, &t_max, 1, MPI_DOUBLE, MPI_MAX, 0, comm_);
+    MPI_Reduce(&p_tot, &t_min, 1, MPI_DOUBLE, MPI_MIN, 0, comm_);
 
     if (rank_ == 0) 
     {   
-      std::cout << "Average time for local counting during instantiation (secs.): " 
-        << ((double)(t_tot / (double)size_)) << std::endl;
+      std::cout << "Avg/Min/Max times for local counting during instantiation (secs.): " 
+        << ((double)(t_tot / (double)size_)) << ", " << t_min << ", " << t_max << std::endl;
     }
 
     t0 = MPI_Wtime();
@@ -302,6 +408,7 @@ class TriangulateAggrBufferedInrecv
 
         GraphElem e0, e1;
         g_->edge_range(i, e0, e1);
+        GraphElem global_i = g_->local_to_global(i);
 
         if ((e0 + 1) == e1)
           continue;
@@ -310,10 +417,14 @@ class TriangulateAggrBufferedInrecv
         {
           EdgeStat& edge = g_->get_edge_stat(m);
           const int owner = g_->get_owner(edge.edge_->tail_);
+          
+          if (global_i > edge.edge_->tail_)
+              continue;
+
           const GraphElem pidx = pindex_[owner];
           const GraphElem disp = pidx*bufsize_;
 
-          if (owner != rank_ && edge.active_)
+          if (edge.active_ && owner > rank_)
           {   
             if (stat_[pidx] == '1') 
               continue;
@@ -335,11 +446,14 @@ class TriangulateAggrBufferedInrecv
 
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
               {  
-                Edge const& edge_n = g_->get_edge(n);                                
-                                  
+                Edge const& edge_n = g_->get_edge(n); 
+                    
+                if (edge.edge_->tail_ > edge_n.tail_)
+                  continue;
+
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
-                
+
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
                   prev_m_[pidx] = m;
@@ -352,17 +466,17 @@ class TriangulateAggrBufferedInrecv
 
                   break;
                 }
-                
+
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
                   continue;
-             
+
                 sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
                 sbuf_ctr_[pidx] += 1;
-                
+
                 out_nghosts_ -= 1;
                 vcount_[i] -= 1;
               }
-              
+
               if (stat_[pidx] == '0') 
               {               
                 prev_m_[pidx] = m;
@@ -481,14 +595,14 @@ class TriangulateAggrBufferedInrecv
          
     inline bool edge_above_min(GraphElem x, GraphElem y) const
     {
-      if (y >= erange_[x*2] || x >= erange_[y*2])
+      if (y >= erange_[x*2])
         return true;
       return false;
     }
 
     inline bool edge_within_max(GraphElem x, GraphElem y) const
     {
-      if (y <= erange_[x*2+1] || x <= erange_[y*2+1])
+      if (y <= erange_[x*2+1])
         return true;
       return false;
     }
@@ -523,14 +637,17 @@ class TriangulateAggrBufferedInrecv
     }
 #endif
 
+#if defined(USE_OPENMP)
     inline void process_recvs()
+#else
+    inline void process_recvs(int* rinds, MPI_Status* rstatuses)
+#endif
     {
       if (in_nghosts_ == 0)
         return;
 
 #if defined(USE_OPENMP) && !defined(RECV_MAP)
 #pragma omp parallel for default(shared) reduction(+:ntriangles_) reduction(-:in_nghosts_)
-#endif
       for (int p = 0; p < rdegree_; p++)
       {
         int over = -1;
@@ -578,7 +695,11 @@ class TriangulateAggrBufferedInrecv
                 if (check_edgelist_omp(tup))
                   ntriangles_ += 1;
 #else
+#if defined(FAST_CHECK_EDGELIST)
                 if (fast_check_edgelist(tup))
+#else
+                if (check_edgelist(tup))
+#endif
                   ntriangles_ += 1;
 #endif
 #endif
@@ -590,14 +711,71 @@ class TriangulateAggrBufferedInrecv
               prev = k;
             }
 
-            if (recv_count_[source] > 0)
-            {
-              MPI_Irecv(&rbuf_[p*bufsize_], bufsize_, 
-                  MPI_GRAPH_TYPE, source, TAG_DATA, comm_, &rreq_[p]);
-            }
+           nbrecv(source);
+          
           }
         }
       }
+#else
+      int over = -1;
+      MPI_Testsome(rdegree_, rreq_, &over, rinds, rstatuses);
+
+      for (int i = 0; i < over; i++)
+      {
+        GraphElem tup[2] = {-1,-1}, prev = 0;
+        const int idx = rinds[i];
+
+        int count = 0;
+        const int source = rstatuses[i].MPI_SOURCE;
+        MPI_Get_count(&rstatuses[i], MPI_GRAPH_TYPE, &count);
+
+        if (source != MPI_ANY_SOURCE)
+        {
+          for (GraphElem k = 0; k < count;)
+          {
+            if (rbuf_[idx*bufsize_+k] == -1)
+            {
+              k += 1;
+              prev = k;
+              continue;
+            }
+
+            tup[0] = rbuf_[idx*bufsize_+k];
+            GraphElem curr_count = 0;
+
+            for (GraphElem m = k + 1; m < count; m++)
+            {
+              if (rbuf_[idx*bufsize_+m] == -1)
+              {
+                curr_count = m + 1;
+                break;
+              }
+
+              tup[1] = rbuf_[idx*bufsize_+m];
+
+#if defined(RECV_MAP)
+              check_rmap(tup);
+#else
+#if defined(FAST_CHECK_EDGELIST)
+                if (fast_check_edgelist(tup))
+#else
+                if (check_edgelist(tup))
+#endif
+                  ntriangles_ += 1;
+#endif
+              in_nghosts_ -= 1;
+              recv_count_[source] -= 1;
+            }
+
+            k += (curr_count - prev);
+            prev = k;
+          }
+
+          nbrecv(source);
+
+        }
+      }
+#endif
     }
 
     inline GraphElem count()
@@ -610,6 +788,11 @@ class TriangulateAggrBufferedInrecv
 #endif
 
       int* inds = new int[pdegree_]();
+#if defined(USE_OPENMP)
+#else
+      int* rinds = new int[rdegree_]();
+      MPI_Status* rstatuses = new MPI_Status[rdegree_]();
+#endif      
       int over = -1;
       
       nbrecv();
@@ -620,7 +803,11 @@ class TriangulateAggrBufferedInrecv
       while(!done)
 #endif
       {
+#if defined(USE_OPENMP)
         process_recvs();
+#else
+        process_recvs(rinds, rstatuses);
+#endif
 
         if (out_nghosts_ == 0)
           nbsend();
@@ -629,13 +816,10 @@ class TriangulateAggrBufferedInrecv
         
         MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
 
-        if (over > 0)
+        for (int i = 0; i < over; i++)
         {
-          for (int i = 0; i < over; i++)
-          {
-            sbuf_ctr_[inds[i]] = 0;
-            stat_[inds[i]] = '0';
-          }
+          sbuf_ctr_[inds[i]] = 0;
+          stat_[inds[i]] = '0';
         }
 
 #if defined(USE_ALLREDUCE_FOR_EXIT)
@@ -669,8 +853,12 @@ class TriangulateAggrBufferedInrecv
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
       
       delete []inds;
-
-      return (ttc/3);
+#if defined(USE_OPENMP)
+#else
+      delete []rinds;
+      delete []rstatuses;
+#endif
+      return ttc;
     }
 
   private:
