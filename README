@@ -69,4 +69,7 @@ Possible options (can be combined):
                       triangle counting. Default buffer size can be set by updating DEFAULT_BUF_SIZE. 
 
 Please try the default version (no need to pass any macro in the Makefile) or the aggregate-buffered
-versions, this is a growing codebase and there are versions that are under development.
+versions, this is a growing codebase and there are versions that are under development. If you want
+to consider a version which uses conditional computation to avoid double or triple counting, then select
+-DAGGR_BUFR_INRECV.
+
