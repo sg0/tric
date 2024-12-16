@@ -140,6 +140,58 @@ T genRandom(T lo, T hi)
     return utd(gen, typename Dist::param_type{lo, hi});
 }
 
+#if defined(USE_RAPID_FAM_ALLOC)
+#include "rapid.hpp"
+
+//Allocator Impl from https://en.cppreference.com/w/cpp/named_req/Allocator#Examples
+template<class T>
+struct RapidAllocator
+{
+    typedef T value_type;
+
+    RapidAllocator() = default;
+
+    template<class U>
+    constexpr RapidAllocator(const RapidAllocator <U>&) noexcept {}
+
+    [[nodiscard]] T* allocate(std::size_t n) {
+        if (n > std::numeric_limits<std::size_t>::max() / sizeof(T)){
+            throw std::bad_array_new_length();
+        }
+
+        if (auto p = static_cast<T*>(rapid.malloc(n * sizeof(T)))) {
+            return p;
+        }
+
+        throw std::bad_alloc();
+    }
+
+    void deallocate(T* p, std::size_t n) noexcept {
+        rapid.free(p);
+    }
+
+    //Helper function for demonstration purposes to show
+    //the Vec's data is in the Rapid VA space.
+    //Not needed in actual code
+    static bool is_fam_pointer(T* addr) noexcept {
+        auto base_va = rapid.get_base_va();
+        auto last_va = rapid.get_last_va();
+        return *base_va <= addr && addr < *last_va;
+    }
+private:
+    static rapid::Fam rapid;
+};
+
+template<class T, class U>
+bool operator==(const RapidAllocator <T>&, const RapidAllocator <U>&) { return true; }
+
+template<class T, class U>
+bool operator!=(const RapidAllocator <T>&, const RapidAllocator <U>&) { return false; }
+
+template <typename T>
+rapid::Fam RapidAllocator<T>::rapid = rapid::Fam{};
+#endif
+
 // Parallel Linear Congruential Generator
 // x[i] = (a*x[i-1] + b)%M
 class LCG

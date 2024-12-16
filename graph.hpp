@@ -306,10 +306,19 @@ class Graph
         
         // public variables
 #if defined(AGGR_BUFR)|| defined(AGGR_BUFR_INRECV) || defined(AGGR_BUFR_IRECV) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
+#if defined(USE_RAPID_FAM_ALLOC)
+        std::vector<EdgeStat, RapidAllocator<EdgeStat>> edge_stat_;
+#else
         std::vector<EdgeStat> edge_stat_;
 #endif
+#endif
+#if defined(USE_RAPID_FAM_ALLOC)
+        std::vector<GraphElem, RapidAllocator<GraphElem>> edge_indices_;
+        std::vector<Edge, RapidAllocator<Edge>> edge_list_;
+#else
         std::vector<GraphElem> edge_indices_;
         std::vector<Edge> edge_list_;
+#endif
     private:
         GraphElem lnv_, lne_, nv_, ne_;
         std::vector<GraphElem> parts_;       
@@ -1160,8 +1169,11 @@ class GenerateRGG
             
             std::vector<GraphElem> ecTmp(n_+1);
             std::partial_sum(g->edge_indices_.begin(), g->edge_indices_.end(), ecTmp.begin());
+#if defined(USE_RAPID_FAM_ALLOC)
+            g->edge_indices_.assign(ecTmp.begin(), ecTmp.end());
+#else
             g->edge_indices_ = ecTmp;
-             
+#endif            
             for(GraphElem i = 1; i < n_+1; i++)
                 g->edge_indices_[i] -= g->edge_indices_[0];   
             g->edge_indices_[0] = 0;

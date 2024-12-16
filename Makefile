@@ -4,8 +4,8 @@ OPTFLAGS = $(DBGFLAGS) -O3 -DPRINT_EXTRA_NEDGES #-DAGGR_BUFR_INRECV #-DDEBUG_PRI
 # -DPRINT_EXTRA_NEDGES prints extra edges when -p <> is passed to 
 #  add extra edges randomly on a generated graph
 # use export ASAN_OPTIONS=verbosity=1 to check ASAN output
-SNTFLAGS = -std=c++11 -fsanitize=address -O1 -fno-omit-frame-pointer
-CXXFLAGS = -std=c++11 $(OPTFLAGS) -I.
+SNTFLAGS = -std=c++20 -fsanitize=address -O1 -fno-omit-frame-pointer
+CXXFLAGS = -std=c++20 $(OPTFLAGS) -I.
 LDFLAGS = ./murmurhash/MurmurHash3.a
 
 OBJ = main.o
@@ -14,6 +14,13 @@ TARGET = tric
 ENABLE_OPENMP=0
 ifeq ($(ENABLE_OPENMP),1)
 CXXFLAGS += -fopenmp -DUSE_OPENMP
+endif
+
+ENABLE_RAPID_FAM=0
+ifeq ($(ENABLE_RAPID_FAM),1)
+RAPID_ROOT = /share/micron/rapid/install/gcc-release
+CXXFLAGS += -DUSE_RAPID_FAM_ALLOC -I$(RAPID_ROOT)/include
+LDFLAGS += -Wl,-rpath=$(RAPID_ROOT)/lib64 -L$(RAPID_ROOT)/lib64 -lrapid -lsw_coherency -lWrapper 
 endif
 
 ENABLE_TAUPROF=0
