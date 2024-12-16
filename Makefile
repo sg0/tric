@@ -20,7 +20,7 @@ ENABLE_RAPID_FAM=0
 ifeq ($(ENABLE_RAPID_FAM),1)
 RAPID_ROOT = /share/micron/rapid/install/gcc-release
 CXXFLAGS += -DUSE_RAPID_FAM_ALLOC -I$(RAPID_ROOT)/include
-LDFLAGS += -Wl,-rpath=$(RAPID_ROOT)/lib64 -L$(RAPID_ROOT)/lib64 -lrapid -lsw_coherency -lWrapper 
+LDFLAGS += -Wl,-rpath=$(RAPID_ROOT)/lib64 -L$(RAPID_ROOT)/lib64 -lrapid 
 endif
 
 ENABLE_TAUPROF=0
