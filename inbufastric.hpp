@@ -137,10 +137,6 @@ class TriangulateAggrBufferedInrecv
             
             if (!edge_within_max(edge_m.tail_, edge_n.tail_))
               break;
-
-            if (edge_m.tail_ > edge_n.tail_)
-              continue;
-
             if (!edge_above_min(edge_m.tail_, edge_n.tail_))
               continue;
 
@@ -165,13 +161,9 @@ class TriangulateAggrBufferedInrecv
                
               if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                 break;
-                   
-              if (edge_m.tail_ > edge_n.tail_)
-                continue;
-
               if (!edge_above_min(edge_m.tail_, edge_n.tail_))
                 continue;
-
+ 
 #pragma omp atomic update
               send_count[owner] += 1;
               vcount_[i] += 1;
@@ -209,13 +201,9 @@ class TriangulateAggrBufferedInrecv
                 Edge const& edge_n = g_->get_edge(n);
                  
                 if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-                  break;
-                               
-                if (edge_m.tail_ > edge_n.tail_)
-                  continue;
-
+                  break;                
                 if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-                  continue;
+                  continue;     
 
                 tup[1] = edge_n.tail_;
 #if defined(FAST_CHECK_EDGELIST)
@@ -228,25 +216,21 @@ class TriangulateAggrBufferedInrecv
         }
         else
         {
-            if (owner > rank_)
+          if (owner > rank_)
+          {
+            for (GraphElem n = m + 1; n < e1; n++)
             {
-                for (GraphElem n = m + 1; n < e1; n++)
-                {
-                    Edge const& edge_n = g_->get_edge(n);
-                     
-                    if (!edge_within_max(edge_m.tail_, edge_n.tail_))
-                        break;
+              Edge const& edge_n = g_->get_edge(n);
 
-                    if (edge_m.tail_ > edge_n.tail_)
-                      continue;
+              if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+                break;                    
+              if (!edge_above_min(edge_m.tail_, edge_n.tail_))
+                continue;            
 
-                    if (!edge_above_min(edge_m.tail_, edge_n.tail_))
-                        continue;
-
-                    send_count[owner] += 1;
-                    vcount_[i] += 1;
-                }
+              send_count[owner] += 1;
+              vcount_[i] += 1;
             }
+          }
         }
       }
     }
@@ -447,12 +431,11 @@ class TriangulateAggrBufferedInrecv
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
               {  
                 Edge const& edge_n = g_->get_edge(n); 
-                    
-                if (edge.edge_->tail_ > edge_n.tail_)
-                  continue;
-
+                 
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
-                  break;
+                  break;                
+                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
+                  continue;
 
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
@@ -466,9 +449,6 @@ class TriangulateAggrBufferedInrecv
 
                   break;
                 }
-
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
-                  continue;
 
                 sbuf_[disp+sbuf_ctr_[pidx]] = edge_n.tail_;
                 sbuf_ctr_[pidx] += 1;
