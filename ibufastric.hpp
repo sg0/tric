@@ -110,17 +110,26 @@ class TriangulateAggrBufferedIrecv
 
       if ((e0 + 1) == e1)
         continue;
+        
+      const GraphElem global_i = g_->local_to_global(i);
 
       for (GraphElem m = e0; m < e1-1; m++)
       {
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
+
+        if (global_i == edge_m.tail_)
+          continue;
+
         tup[0] = edge_m.tail_;
         if (owner == rank_)
         {
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
+      
+            if (!edge_within_max(edge_m.tail_, edge_n.tail_))
+              break;
 
             tup[1] = edge_n.tail_;
             if (check_edgelist(tup))
@@ -129,10 +138,6 @@ class TriangulateAggrBufferedIrecv
         }
         else
         {
-          if (std::find(targets_.begin(), targets_.end(), owner) 
-              == targets_.end())
-            targets_.push_back(owner);
-
           for (GraphElem n = m + 1; n < e1; n++)
           {
             Edge const& edge_n = g_->get_edge(n);
@@ -159,16 +164,7 @@ class TriangulateAggrBufferedIrecv
       std::cout << "Average time for local counting during instantiation (secs.): " 
         << ((double)(t_tot / (double)size_)) << std::endl;
     }
-
-    pdegree_ = targets_.size();
-
-    for (int i = 0; i < pdegree_; i++)
-      pindex_.insert({targets_[i], i});
-    
-    t0 = MPI_Wtime();
-
-    MPI_Barrier(comm_);
-
+   
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
     
@@ -176,10 +172,17 @@ class TriangulateAggrBufferedIrecv
     {
       out_nghosts_ += send_count[p];
       in_nghosts_ += recv_count[p];
+      
+      if (send_count[p] > 0)
+        targets_.push_back(p);
     }
+     
+    pdegree_ = targets_.size();
+
+    for (int i = 0; i < pdegree_; i++)
+      pindex_.insert({targets_[i], i});
     
     nghosts_ = out_nghosts_ + in_nghosts_;
-
     bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
 
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
@@ -270,6 +273,8 @@ class TriangulateAggrBufferedIrecv
 
         GraphElem e0, e1;
         g_->edge_range(i, e0, e1);
+      
+        const GraphElem global_i = g_->local_to_global(i);
 
         if ((e0 + 1) == e1)
           continue;
@@ -278,6 +283,10 @@ class TriangulateAggrBufferedIrecv
         {
           EdgeStat& edge = g_->get_edge_stat(m);
           const int owner = g_->get_owner(edge.edge_->tail_);
+
+          if (global_i == edge.edge_->tail_)
+            continue;
+
           const GraphElem pidx = pindex_[owner];
           const GraphElem disp = pidx*bufsize_;
 

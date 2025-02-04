@@ -80,12 +80,15 @@ class TriangulateAggrFatCompressed
             {
                 GraphElem e0, e1;
                 g_->edge_range(i, e0, e1);
+                const GraphElem global_i = g_->local_to_global(i);
                 if ((e0 + 1) == e1)
                     continue;
                 // calculate ghosts
                 for (GraphElem m = e0; m < e1-1; m++)
                 {
-                    Edge const& edge_m = g_->get_edge(m);
+                  Edge const& edge_m = g_->get_edge(m);
+                  if (global_i == edge_m.tail_)
+                    continue;
                     const int owner = g_->get_owner(edge_m.tail_);
                     if (owner != rank_)
                     {
@@ -143,9 +146,12 @@ class TriangulateAggrFatCompressed
                 g_->edge_range(i, e0, e1);
                 if ((e0 + 1) == e1)
                     continue;
+                const GraphElem global_i = g_->local_to_global(i);
                 for (GraphElem m = e0; m < e1-1; m++)
                 {
                     Edge const& edge_m = g_->get_edge(m);
+                    if (global_i == edge_m.tail_)
+                      continue;
                     const int owner = g_->get_owner(edge_m.tail_);
                     tup[0] = edge_m.tail_;
                     if (owner == rank_)

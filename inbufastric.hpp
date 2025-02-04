@@ -125,7 +125,7 @@ class TriangulateAggrBufferedInrecv
         Edge const& edge_m = g_->get_edge(m);
         const int owner = g_->get_owner(edge_m.tail_);
         tup[0] = edge_m.tail_;
-
+          
         if (global_i >= tup[0])
           continue;
 
@@ -184,14 +184,15 @@ class TriangulateAggrBufferedInrecv
 
       if ((e0 + 1) == e1)
         continue;
-
+          
       for (GraphElem m = e0; m < e1-1; m++)
       {
         Edge const& edge_m = g_->get_edge(m);
-        const int owner = g_->get_owner(edge_m.tail_);
-
+        
         if (global_i >= edge_m.tail_)
           continue;
+
+        const int owner = g_->get_owner(edge_m.tail_);
 
         if (owner == rank_)
         {
@@ -199,7 +200,6 @@ class TriangulateAggrBufferedInrecv
             for (GraphElem n = m + 1; n < e1; n++)
             {
                 Edge const& edge_n = g_->get_edge(n);
-
                 if (!edge_within_max(edge_m.tail_, edge_n.tail_))
                   break; 
                 if (!edge_above_min(edge_m.tail_, edge_n.tail_))
@@ -403,10 +403,11 @@ class TriangulateAggrBufferedInrecv
         for (GraphElem m = e0; m < e1-1; m++)
         {
           EdgeStat& edge = g_->get_edge_stat(m);
-          const int owner = g_->get_owner(edge.edge_->tail_);
           
           if (global_i >= edge.edge_->tail_)
             continue;
+          
+          const int owner = g_->get_owner(edge.edge_->tail_);
 
           const GraphElem pidx = pindex_[owner];
           const GraphElem disp = pidx*bufsize_;
@@ -434,7 +435,7 @@ class TriangulateAggrBufferedInrecv
               for (GraphElem n = ((prev_k_[pidx] == -1) ? (m + 1) : prev_k_[pidx]); n < e1; n++)
               {  
                 Edge const& edge_n = g_->get_edge(n); 
-                             
+
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break; 
                 if (!edge_above_min(edge.edge_->tail_, edge_n.tail_))
