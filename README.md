@@ -14,10 +14,6 @@ In 2022 IEEE High Performance Extreme Computing Conference (HPEC) 2022 Sep 19 (p
 Graph Structure. In 2020 IEEE High Performance Extreme Computing Conference (HPEC) 2020 
 Sep 22 (pp. 1-6). IEEE.
 
-Please contact the following for any queries or support:
-
-Sayan Ghosh, PNNL (sg0 at pnnl dot gov)
-
 Please `*` this repository if you find it useful.
 
 **This repository is archived, check out https://github.com/sg0/xxtric for updated implementations.**
