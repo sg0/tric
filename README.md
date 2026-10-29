@@ -20,7 +20,7 @@ Sayan Ghosh, PNNL (sg0 at pnnl dot gov)
 
 Please `*` this repository if you find it useful.
 
-**This repository is archived, use https://github.com/sg0/xxtric for updated triangle counting.**
+**This repository is archived, check out https://github.com/sg0/xxtric for updated implementations.**
 
 ## Compile
 
