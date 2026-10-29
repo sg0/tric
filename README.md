@@ -1,0 +1,75 @@
+   *
+  /
+ /\  *--*--**--*
+*  \/\__*  ||
+   /\ \    ||
+  *__* *   **--*
+*****
+About
+*****
+
+`tric` is a distributed-memory triangle counting code that assumes a 1-D vertex-based 
+distribution of a graph. The concept is quite simple, and the main idea is to consider
+all combinations of consecutive edges and check whether they are triangles. For high-degree
+graphs, this design can result in significant memory increase.
+
+Papers:
+
+[1] Ghosh S. Improved Distributed-memory Triangle Counting by Exploiting the Graph Structure. 
+In 2022 IEEE High Performance Extreme Computing Conference (HPEC) 2022 Sep 19 (pp. 1-6). IEEE.
+
+[2] Ghosh S, Halappanavar M. TriC: Distributed-memory Triangle Counting by Exploiting the 
+Graph Structure. In 2020 IEEE High Performance Extreme Computing Conference (HPEC) 2020 
+Sep 22 (pp. 1-6). IEEE.
+
+Please contact the following for any queries or support:
+
+Sayan Ghosh, PNNL (sg0 at pnnl dot gov)
+
+Please '*' this repository if you find it useful.
+
+**This repository is archived, use https://github.com/sg0/xxtric for updated triangle counting.**
+*******
+Compile
+*******
+
+tric is a C++ header-only interface and requires an MPI implementation. It uses MPI Send/Recv and 
+collectives, and may also use derived-types based on the version used. Please update the Makefile 
+with compiler flags and use a C++11 compliant compiler of your choice. Invoke `make clean; make` 
+after setting paths to MPI for generating the binary. Use `mpirun` or `mpiexec` or `srun` to 
+execute the code with specific runtime arguments mentioned in the next section.
+
+Pass -DPRINT_DIST_STATS while building for printing distributed graph characteristics.
+
+*****************
+Execution options
+*****************
+E.g.: 
+mpiexec -n 2 bin/./tric -f karate.bin 
+mpiexec -n 2 bin/./neve -n 100 -t 0
+mpiexec -n 2 bin/./neve -p 2 -n 100
+
+Possible options (can be combined):
+
+1.  -f <bin-file>   : Specify input binary file after this argument. 
+2.  -b              : Only valid for real-world inputs. Attempts to distribute approximately 
+                      equal number of edges among processes. Irregular number of vertices
+                      owned by a particular process. Increases the distributed graph creation
+                      time due to serial overheads, but may improve overall execution time.
+3.  -n <vertices>   : Only valid for synthetically generated inputs. Pass total number of 
+                      vertices of the generated graph.
+4.  -l              : Use distributed LCG for randomly choosing edges. If this option 
+                      is not used, we will use C++ random number generator (using 
+                      std::default_random_engine).
+5.  -p <percent>    : Only valid for synthetically generated inputs. Specify percent of overall 
+                      edges to be randomly generated between processes.
+6.  -r <nranks>     : This is used to control the number of aggregators in MPI I/O and is
+                      meaningful when an input binary graph file is passed with option "-f".
+                      naggr := (nranks > 1) ? (nprocs/nranks) : nranks;
+7.  -s <size>       : Buffer size, only relevant when -DAGGR_<> is passed for aggregate-buffered 
+                      triangle counting. Default buffer size can be set by updating DEFAULT_BUF_SIZE. 
+
+Please try the default version (no need to pass any macro in the Makefile) or the aggregate-buffered
+versions, this is a growing codebase and there are versions that are under development. If you want
+to consider a version which uses conditional computation to avoid double or triple counting, then select
+-DAGGR_BUFR_INRECV.
