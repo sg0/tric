@@ -1,12 +1,4 @@
-   *
-  /
- /\  *--*--**--*
-*  \/\__*  ||
-   /\ \    ||
-  *__* *   **--*
-*****
-About
-*****
+## About
 
 `tric` is a distributed-memory triangle counting code that assumes a 1-D vertex-based 
 distribution of a graph. The concept is quite simple, and the main idea is to consider
@@ -26,12 +18,11 @@ Please contact the following for any queries or support:
 
 Sayan Ghosh, PNNL (sg0 at pnnl dot gov)
 
-Please '*' this repository if you find it useful.
+Please `*` this repository if you find it useful.
 
 **This repository is archived, use https://github.com/sg0/xxtric for updated triangle counting.**
-*******
-Compile
-*******
+
+## Compile
 
 tric is a C++ header-only interface and requires an MPI implementation. It uses MPI Send/Recv and 
 collectives, and may also use derived-types based on the version used. Please update the Makefile 
@@ -41,16 +32,17 @@ execute the code with specific runtime arguments mentioned in the next section.
 
 Pass -DPRINT_DIST_STATS while building for printing distributed graph characteristics.
 
-*****************
-Execution options
-*****************
-E.g.: 
+## Run
+
+```bash
 mpiexec -n 2 bin/./tric -f karate.bin 
 mpiexec -n 2 bin/./neve -n 100 -t 0
 mpiexec -n 2 bin/./neve -p 2 -n 100
+```
 
 Possible options (can be combined):
 
+```bash
 1.  -f <bin-file>   : Specify input binary file after this argument. 
 2.  -b              : Only valid for real-world inputs. Attempts to distribute approximately 
                       equal number of edges among processes. Irregular number of vertices
@@ -68,6 +60,7 @@ Possible options (can be combined):
                       naggr := (nranks > 1) ? (nprocs/nranks) : nranks;
 7.  -s <size>       : Buffer size, only relevant when -DAGGR_<> is passed for aggregate-buffered 
                       triangle counting. Default buffer size can be set by updating DEFAULT_BUF_SIZE. 
+```
 
 Please try the default version (no need to pass any macro in the Makefile) or the aggregate-buffered
 versions, this is a growing codebase and there are versions that are under development. If you want
